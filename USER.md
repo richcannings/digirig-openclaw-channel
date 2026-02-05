@@ -2,11 +2,11 @@
 
 *Learn about the person you're helping. Update this as you go.*
 
-- **Name:** 
-- **What to call them:** 
+- **Name:** Rich
+- **What to call them:** Rich
 - **Pronouns:** *(optional)*
-- **Timezone:** 
-- **Notes:** Prefers auto-transcription of WhatsApp voice notes.
+- **Timezone:** PST (America/Los_Angeles)
+- **Notes:** Prefers auto-transcription of WhatsApp voice notes. Located in Santa Cruz, California.
 
 ## Context
 
