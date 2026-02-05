@@ -1,38 +1,57 @@
 import { z } from "zod";
 
+import {
+  DEFAULT_AUDIO_CHANNELS,
+  DEFAULT_AUDIO_DEVICE,
+  DEFAULT_AUDIO_SAMPLE_RATE,
+  DEFAULT_PTT_DEVICE,
+  DEFAULT_PTT_LEAD_MS,
+  DEFAULT_PTT_TAIL_MS,
+  DEFAULT_RX_BUSY_HOLD_MS,
+  DEFAULT_RX_ENERGY_THRESHOLD,
+  DEFAULT_RX_FRAME_MS,
+  DEFAULT_RX_MAX_RECORD_MS,
+  DEFAULT_RX_MAX_SILENCE_MS,
+  DEFAULT_RX_MIN_SPEECH_MS,
+  DEFAULT_RX_PRE_ROLL_MS,
+  DEFAULT_STT_ARGS,
+  DEFAULT_STT_COMMAND,
+  DEFAULT_STT_TIMEOUT_MS,
+} from "./defaults.js";
+
 const DigirigAudioSchema = z
   .object({
-    device: z.string().default("hw:2,0"),
-    sampleRate: z.number().int().positive().default(16000),
-    channels: z.number().int().min(1).max(2).default(1),
+    device: z.string().default(DEFAULT_AUDIO_DEVICE),
+    sampleRate: z.number().int().positive().default(DEFAULT_AUDIO_SAMPLE_RATE),
+    channels: z.number().int().min(1).max(2).default(DEFAULT_AUDIO_CHANNELS),
   })
   .default({});
 
 const DigirigPttSchema = z
   .object({
-    device: z.string().default("/dev/ttyUSB0"),
+    device: z.string().default(DEFAULT_PTT_DEVICE),
     rts: z.boolean().default(true),
-    leadMs: z.number().int().min(0).default(120),
-    tailMs: z.number().int().min(0).default(120),
+    leadMs: z.number().int().min(0).default(DEFAULT_PTT_LEAD_MS),
+    tailMs: z.number().int().min(0).default(DEFAULT_PTT_TAIL_MS),
   })
   .default({});
 
 const DigirigRxSchema = z
   .object({
-    energyThreshold: z.number().min(0).default(0.02),
-    frameMs: z.number().int().min(5).default(20),
-    preRollMs: z.number().int().min(0).default(150),
-    minSpeechMs: z.number().int().min(50).default(200),
-    maxSilenceMs: z.number().int().min(100).default(700),
-    maxRecordMs: z.number().int().min(1000).default(10000),
-    busyHoldMs: z.number().int().min(50).default(300),
+    energyThreshold: z.number().min(0).default(DEFAULT_RX_ENERGY_THRESHOLD),
+    frameMs: z.number().int().min(5).default(DEFAULT_RX_FRAME_MS),
+    preRollMs: z.number().int().min(0).default(DEFAULT_RX_PRE_ROLL_MS),
+    minSpeechMs: z.number().int().min(50).default(DEFAULT_RX_MIN_SPEECH_MS),
+    maxSilenceMs: z.number().int().min(100).default(DEFAULT_RX_MAX_SILENCE_MS),
+    maxRecordMs: z.number().int().min(1000).default(DEFAULT_RX_MAX_RECORD_MS),
+    busyHoldMs: z.number().int().min(50).default(DEFAULT_RX_BUSY_HOLD_MS),
   })
   .default({});
 
 const DigirigSttSchema = z.object({
-  command: z.string().min(1, "stt.command is required"),
-  args: z.array(z.string()).default(["{input}"]),
-  timeoutMs: z.number().int().min(1000).default(15000),
+  command: z.string().min(1, "stt.command is required").default(DEFAULT_STT_COMMAND),
+  args: z.array(z.string()).default(DEFAULT_STT_ARGS),
+  timeoutMs: z.number().int().min(1000).default(DEFAULT_STT_TIMEOUT_MS),
 });
 
 export const DigirigConfigSchema = z.object({
