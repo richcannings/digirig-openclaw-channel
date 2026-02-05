@@ -1,5 +1,6 @@
 import type { ChannelPlugin } from "openclaw/plugin-sdk";
-import { buildChannelConfigSchema, DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk";
+import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import { DigirigConfigSchema, type DigirigConfig } from "./src/config.js";
 import { createDigirigRuntime, type DigirigRuntime } from "./src/runtime.js";
 import { setDigirigRuntime } from "./src/state.js";
@@ -26,7 +27,12 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
     blockStreaming: true,
   },
   reload: { configPrefixes: ["channels.digirig"] },
-  configSchema: buildChannelConfigSchema(DigirigConfigSchema),
+  configSchema: {
+    schema: zodToJsonSchema(DigirigConfigSchema, {
+      target: "draft-07",
+      unrepresentable: "any",
+    }) as unknown,
+  },
   config: {
     listAccountIds: () => [DEFAULT_ACCOUNT_ID],
     resolveAccount: (cfg) => {
