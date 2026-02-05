@@ -67,6 +67,12 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
     audioMonitor.on("log", (msg) => ctx.log?.debug?.(`[digirig] ${msg}`));
     audioMonitor.on("error", (err) => ctx.log?.error?.(`[digirig] ${String(err)}`));
+    audioMonitor.on("recording-start", (evt) =>
+      ctx.log?.info?.(`[digirig] RX start (energy=${evt?.energy?.toFixed?.(4) ?? "?"})`),
+    );
+    audioMonitor.on("recording-end", (evt) =>
+      ctx.log?.info?.(`[digirig] RX end (durationMs=${evt?.durationMs ?? "?"})`),
+    );
     audioMonitor.on("utterance", async (utterance) => {
       try {
         const wav = pcmToWav(utterance.pcm, utterance.sampleRate, utterance.channels);
@@ -82,15 +88,65 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           return;
         }
 
-        await runtime.channel.reply.handleInboundMessage({
+        const cfg = runtime.config.loadConfig();
+        const route = runtime.channel.routing.resolveAgentRoute({
+          cfg,
           channel: "digirig",
           accountId: "default",
-          senderId: "radio",
-          chatType: "direct",
-          chatId: "radio",
-          text,
-          reply: async (responseText: string) => {
-            await speak(responseText);
+          peer: {
+            kind: "direct",
+            id: "radio",
+          },
+        });
+
+        const envelopeOptions = runtime.channel.reply.resolveEnvelopeFormatOptions(cfg);
+        const body = runtime.channel.reply.formatAgentEnvelope({
+          channel: "DigiRig",
+          from: "radio",
+          timestamp: Date.now(),
+          envelope: envelopeOptions,
+          body: text,
+        });
+
+        const ctxPayload = runtime.channel.reply.finalizeInboundContext({
+          Body: body,
+          RawBody: text,
+          CommandBody: text,
+          From: "digirig:radio",
+          To: "digirig:radio",
+          SessionKey: route.sessionKey,
+          AccountId: route.accountId,
+          ChatType: "direct",
+          ConversationLabel: "radio",
+          SenderName: "radio",
+          SenderId: "radio",
+          Provider: "digirig",
+          Surface: "digirig",
+          MessageSid: `digirig-${Date.now()}`,
+          OriginatingChannel: "digirig",
+          OriginatingTo: "digirig:radio",
+        });
+
+        const storePath = runtime.channel.session.resolveStorePath(cfg.session?.store, {
+          agentId: route.agentId,
+        });
+        await runtime.channel.session.recordInboundSession({
+          storePath,
+          sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+          ctx: ctxPayload,
+          onRecordError: (err) =>
+            ctx.log?.error?.(`[digirig] session record error: ${String(err)}`),
+        });
+
+        await runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+          ctx: ctxPayload,
+          cfg,
+          dispatcherOptions: {
+            deliver: async (payload) => {
+              if (payload.text) {
+                await speak(payload.text);
+              }
+            },
           },
         });
       } catch (err) {

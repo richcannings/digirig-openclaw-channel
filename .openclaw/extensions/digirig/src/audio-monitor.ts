@@ -104,6 +104,7 @@ export class AudioMonitor extends EventEmitter {
         this.storePreRoll(frame);
         if (energy >= this.config.energyThreshold) {
           this.recording = true;
+          this.emit("recording-start", { energy, at: Date.now() });
           this.utteranceBuffers = this.preRollFrames.slice();
           this.preRollFrames = [];
           this.utteranceMs = 0;
@@ -144,6 +145,7 @@ export class AudioMonitor extends EventEmitter {
   private finishUtterance(): void {
     const pcm = Buffer.concat(this.utteranceBuffers);
     this.recording = false;
+    this.emit("recording-end", { durationMs: this.utteranceMs, at: Date.now() });
     this.utteranceBuffers = [];
     this.utteranceMs = 0;
     this.silenceMs = 0;
