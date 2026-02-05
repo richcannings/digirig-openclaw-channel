@@ -1,0 +1,9 @@
+{
+  "id": "digirig",
+  "channels": ["digirig"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
