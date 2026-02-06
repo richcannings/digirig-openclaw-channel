@@ -21,7 +21,8 @@ import {
 
 const DigirigAudioSchema = z
   .object({
-    device: z.string().default(DEFAULT_AUDIO_DEVICE),
+    inputDevice: z.string().default(DEFAULT_AUDIO_DEVICE),
+    outputDevice: z.string().default(DEFAULT_AUDIO_DEVICE),
     sampleRate: z.number().int().positive().default(DEFAULT_AUDIO_SAMPLE_RATE),
     channels: z.number().int().min(1).max(2).default(DEFAULT_AUDIO_CHANNELS),
   })

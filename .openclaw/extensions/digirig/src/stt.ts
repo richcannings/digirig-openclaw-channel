@@ -34,7 +34,8 @@ export async function runStt(params: {
     proc.kill("SIGKILL");
   }, config.timeoutMs);
 
-  const exitCode = await new Promise<number | null>((resolve) => {
+  const exitCode = await new Promise<number | null>((resolve, reject) => {
+    proc.on("error", (err) => reject(err));
     proc.on("exit", (code) => resolve(code));
   });
   clearTimeout(timeout);

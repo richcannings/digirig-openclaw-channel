@@ -1,8 +1,7 @@
 import type { ChannelPlugin } from "openclaw/plugin-sdk";
-import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { DEFAULT_ACCOUNT_ID, buildChannelConfigSchema } from "openclaw/plugin-sdk";
 import { DigirigConfigSchema, type DigirigConfig } from "./src/config.js";
-import { createDigirigRuntime, type DigirigRuntime } from "./src/runtime.js";
+import { appendCallsign, createDigirigRuntime, type DigirigRuntime } from "./src/runtime.js";
 import { setDigirigRuntime } from "./src/state.js";
 
 const meta = {
@@ -27,12 +26,7 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
     blockStreaming: true,
   },
   reload: { configPrefixes: ["channels.digirig"] },
-  configSchema: {
-    schema: zodToJsonSchema(DigirigConfigSchema, {
-      target: "draft-07",
-      unrepresentable: "any",
-    }) as unknown,
-  },
+  configSchema: buildChannelConfigSchema(DigirigConfigSchema),
   config: {
     listAccountIds: () => [DEFAULT_ACCOUNT_ID],
     resolveAccount: (cfg) => {
@@ -65,7 +59,7 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
     deliveryMode: "direct",
     sendText: async ({ text }) => {
       const runtime = getRuntime();
-      await runtime.speak(text);
+      await runtime.speak(appendCallsign(text));
       return { channel: "digirig", messageId: `digirig-${Date.now()}` };
     },
   },

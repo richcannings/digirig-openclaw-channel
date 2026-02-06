@@ -27,10 +27,15 @@ export class AudioMonitor extends EventEmitter {
   private proc: ReturnType<typeof spawn> | null = null;
   private stopped = false;
   private recording = false;
+  private mutedUntil = 0;
+  private restartTimer: NodeJS.Timeout | null = null;
+  private restartDelayMs = 500;
   private utteranceBuffers: Buffer[] = [];
   private utteranceMs = 0;
   private silenceMs = 0;
   private lastActiveAt = 0;
+  private lastFrameAt = 0;
+  private stallTimer: NodeJS.Timeout | null = null;
   private preRollFrames: Buffer[] = [];
   private preRollMaxFrames: number;
 
@@ -45,6 +50,9 @@ export class AudioMonitor extends EventEmitter {
     if (this.proc) {
       return;
     }
+
+    this.lastFrameAt = Date.now();
+    this.startStallTimer();
 
     const args = [
       "-D",
@@ -63,19 +71,25 @@ export class AudioMonitor extends EventEmitter {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    this.proc.stdout?.on("data", (chunk: Buffer) => this.handleChunk(chunk));
+    this.proc.stdout?.on("data", (chunk: Buffer) => {
+      this.lastFrameAt = Date.now();
+      this.handleChunk(chunk);
+    });
     this.proc.stderr?.on("data", (chunk: Buffer) => {
       this.emit("log", chunk.toString());
     });
     this.proc.on("exit", (code) => {
       if (!this.stopped) {
         this.emit("error", new Error(`arecord exited with ${code ?? "unknown"}`));
+        this.scheduleRestart();
       }
     });
   }
 
   stop(): void {
     this.stopped = true;
+    this.clearRestartTimer();
+    this.clearStallTimer();
     if (this.proc) {
       this.proc.kill("SIGTERM");
       this.proc = null;
@@ -84,6 +98,10 @@ export class AudioMonitor extends EventEmitter {
 
   getBusy(): boolean {
     return Date.now() - this.lastActiveAt < this.config.busyHoldMs;
+  }
+
+  muteFor(ms: number): void {
+    this.mutedUntil = Math.max(this.mutedUntil, Date.now() + Math.max(0, ms));
   }
 
   private handleChunk(chunk: Buffer): void {
@@ -98,6 +116,10 @@ export class AudioMonitor extends EventEmitter {
 
       if (energy >= this.config.energyThreshold) {
         this.lastActiveAt = Date.now();
+      }
+
+      if (Date.now() < this.mutedUntil) {
+        continue;
       }
 
       if (!this.recording) {
@@ -154,6 +176,12 @@ export class AudioMonitor extends EventEmitter {
       return;
     }
 
+    const rms = computeRms(pcm.subarray(0, Math.min(pcm.length, 32000)));
+    if (rms < this.config.energyThreshold * 0.5) {
+      this.emit("log", `discarded low-energy clip (rms=${rms.toFixed(4)})`);
+      return;
+    }
+
     this.emit("utterance", {
       pcm,
       sampleRate: this.config.sampleRate,
@@ -161,6 +189,65 @@ export class AudioMonitor extends EventEmitter {
       startAt: Date.now(),
       endAt: Date.now(),
     } as AudioUtterance);
+  }
+
+  private startStallTimer(): void {
+    if (this.stallTimer) {
+      return;
+    }
+    const checkIntervalMs = Math.max(500, this.config.frameMs * 4);
+    const stallThresholdMs = Math.max(2000, this.config.frameMs * 50);
+    this.stallTimer = setInterval(() => {
+      if (this.stopped) {
+        return;
+      }
+      if (!this.proc) {
+        return;
+      }
+      if (Date.now() - this.lastFrameAt > stallThresholdMs) {
+        this.emit("error", new Error("arecord stalled"));
+        this.scheduleRestart();
+      }
+    }, checkIntervalMs);
+  }
+
+  private clearStallTimer(): void {
+    if (this.stallTimer) {
+      clearInterval(this.stallTimer);
+      this.stallTimer = null;
+    }
+  }
+
+  private scheduleRestart(): void {
+    if (this.stopped) {
+      return;
+    }
+    if (this.restartTimer) {
+      return;
+    }
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      this.restart();
+    }, this.restartDelayMs);
+  }
+
+  private clearRestartTimer(): void {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+  }
+
+  private restart(): void {
+    if (this.stopped) {
+      return;
+    }
+    if (this.proc) {
+      this.proc.kill("SIGTERM");
+      this.proc = null;
+    }
+    this.clearStallTimer();
+    this.start();
   }
 }
 

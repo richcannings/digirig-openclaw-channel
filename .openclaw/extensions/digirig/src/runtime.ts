@@ -10,6 +10,19 @@ import { runStt } from "./stt.js";
 import { pcmToWav } from "./wav.js";
 import { playPcm, synthesizeTts } from "./tts.js";
 
+const CALLSIGN_TEXT = "W6RGC/AI, Whiskey Six Romeo Golf Charlie stroke Alpha India";
+
+export function appendCallsign(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  if (trimmed.toUpperCase().includes("W6RGC/AI")) {
+    return trimmed;
+  }
+  return `${trimmed} ${CALLSIGN_TEXT}`;
+}
+
 export type DigirigRuntime = {
   start: (ctx: ChannelGatewayStartContext<DigirigConfig>) => Promise<{ stop: () => void }>;
   stop: () => Promise<void>;
@@ -19,7 +32,7 @@ export type DigirigRuntime = {
 export async function createDigirigRuntime(config: DigirigConfig): Promise<DigirigRuntime> {
   const runtime = getDigirigRuntime();
   const audioMonitor = new AudioMonitor({
-    device: config.audio.device,
+    device: config.audio.inputDevice,
     sampleRate: config.audio.sampleRate,
     channels: config.audio.channels,
     frameMs: config.rx.frameMs,
@@ -45,12 +58,15 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     if (!text.trim()) {
       return;
     }
+    if (!config.ptt.rts) {
+      return;
+    }
     outboundQueue = outboundQueue.then(async () => {
       await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 2000);
       await ptt.withTx(async () => {
         const tts = await synthesizeTts(runtime, text);
         await playPcm({
-          device: config.audio.device,
+          device: config.audio.outputDevice,
           sampleRate: tts.sampleRate,
           channels: config.audio.channels,
           pcm: tts.audioBuffer,
@@ -84,6 +100,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           sampleRate: utterance.sampleRate,
         });
         await fs.unlink(filePath).catch(() => undefined);
+        ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
         if (!text.trim()) {
           return;
         }
@@ -138,17 +155,29 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             ctx.log?.error?.(`[digirig] session record error: ${String(err)}`),
         });
 
-        await runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+        const { dispatcher, replyOptions, markDispatchIdle } =
+          runtime.channel.reply.createReplyDispatcherWithTyping({
+            deliver: async (payload, info) => {
+              if (!payload.text) {
+                return;
+              }
+              const isFinal = info?.kind === "final";
+              const txText = isFinal ? appendCallsign(payload.text) : payload.text;
+              audioMonitor.muteFor(800);
+              await speak(txText);
+              audioMonitor.muteFor(800);
+            },
+            onError: (err, info) =>
+              ctx.log?.error?.(`[digirig] ${info.kind} reply failed: ${String(err)}`),
+          });
+
+        await runtime.channel.reply.dispatchReplyFromConfig({
           ctx: ctxPayload,
           cfg,
-          dispatcherOptions: {
-            deliver: async (payload) => {
-              if (payload.text) {
-                await speak(payload.text);
-              }
-            },
-          },
+          dispatcher,
+          replyOptions,
         });
+        markDispatchIdle();
       } catch (err) {
         ctx.log?.error?.(`[digirig] inbound error: ${String(err)}`);
       }
