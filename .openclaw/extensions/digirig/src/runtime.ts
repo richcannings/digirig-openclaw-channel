@@ -29,6 +29,37 @@ export type DigirigRuntime = {
   speak: (text: string) => Promise<void>;
 };
 
+const ACK_TONE_HZ = 880;
+const ACK_TONE_MS = 200;
+
+function buildAckTonePcm(sampleRate: number, durationMs: number, frequencyHz: number): Buffer {
+  const totalSamples = Math.floor((sampleRate * durationMs) / 1000);
+  const pcm = Buffer.alloc(totalSamples * 2);
+  const amplitude = 0.2;
+  for (let i = 0; i < totalSamples; i += 1) {
+    const t = i / sampleRate;
+    const sample = Math.sin(2 * Math.PI * frequencyHz * t) * amplitude;
+    const value = Math.max(-1, Math.min(1, sample));
+    pcm.writeInt16LE(Math.floor(value * 32767), i * 2);
+  }
+  return pcm;
+}
+
+async function playAckTone(config: DigirigConfig, ptt: PttController): Promise<void> {
+  if (!config.ptt.rts) {
+    return;
+  }
+  const pcm = buildAckTonePcm(config.audio.sampleRate, ACK_TONE_MS, ACK_TONE_HZ);
+  await ptt.withTx(async () => {
+    await playPcm({
+      device: config.audio.outputDevice,
+      sampleRate: config.audio.sampleRate,
+      channels: 1,
+      pcm,
+    });
+  });
+}
+
 export async function createDigirigRuntime(config: DigirigConfig): Promise<DigirigRuntime> {
   const runtime = getDigirigRuntime();
   const audioMonitor = new AudioMonitor({
@@ -91,18 +122,30 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     );
     audioMonitor.on("utterance", async (utterance) => {
       try {
-        const wav = pcmToWav(utterance.pcm, utterance.sampleRate, utterance.channels);
-        const filePath = join(tmpdir(), `digirig-${Date.now()}.wav`);
-        await fs.writeFile(filePath, wav);
-        const text = await runStt({
-          config: config.stt,
-          inputPath: filePath,
-          sampleRate: utterance.sampleRate,
-        });
-        await fs.unlink(filePath).catch(() => undefined);
+        const filePath = await writeTempWav(utterance);
+        let text = "";
+        try {
+          text = await runStt({
+            config: config.stt,
+            inputPath: filePath,
+            sampleRate: utterance.sampleRate,
+          });
+        } finally {
+          await fs.unlink(filePath).catch(() => undefined);
+        }
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
         if (!text.trim()) {
           return;
+        }
+
+        if (config.rx.ackToneEnabled) {
+          try {
+            audioMonitor.muteFor(400);
+            await playAckTone(config, ptt);
+            audioMonitor.muteFor(400);
+          } catch (toneErr) {
+            ctx.log?.error?.(`[digirig] ack tone failed: ${String(toneErr)}`);
+          }
         }
 
         const cfg = runtime.config.loadConfig();
@@ -218,4 +261,15 @@ async function waitForClearChannel(
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function writeTempWav(utterance: {
+  pcm: Buffer;
+  sampleRate: number;
+  channels: number;
+}): Promise<string> {
+  const wav = pcmToWav(utterance.pcm, utterance.sampleRate, utterance.channels);
+  const filePath = join(tmpdir(), `digirig-${Date.now()}.wav`);
+  await fs.writeFile(filePath, wav);
+  return filePath;
 }

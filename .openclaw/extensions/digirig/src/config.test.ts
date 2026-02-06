@@ -9,7 +9,8 @@ describe("DigirigConfigSchema", () => {
 
   it("applies defaults", () => {
     const result = DigirigConfigSchema.parse({ stt: { command: "whisper" } });
-    expect(result.audio.device).toBe("hw:2,0");
+    expect(result.audio.inputDevice).toBe("hw:2,0");
+    expect(result.audio.outputDevice).toBe("hw:2,0");
     expect(result.ptt.device).toBe("/dev/ttyUSB0");
     expect(result.rx.frameMs).toBe(20);
     expect(result.stt.command).toBe("whisper");

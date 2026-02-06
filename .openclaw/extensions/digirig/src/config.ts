@@ -8,6 +8,7 @@ import {
   DEFAULT_PTT_LEAD_MS,
   DEFAULT_PTT_TAIL_MS,
   DEFAULT_RX_BUSY_HOLD_MS,
+  DEFAULT_RX_ACK_TONE_ENABLED,
   DEFAULT_RX_ENERGY_THRESHOLD,
   DEFAULT_RX_FRAME_MS,
   DEFAULT_RX_MAX_RECORD_MS,
@@ -45,6 +46,7 @@ const DigirigRxSchema = z
     maxSilenceMs: z.number().int().min(100).default(DEFAULT_RX_MAX_SILENCE_MS),
     maxRecordMs: z.number().int().min(1000).default(DEFAULT_RX_MAX_RECORD_MS),
     busyHoldMs: z.number().int().min(50).default(DEFAULT_RX_BUSY_HOLD_MS),
+    ackToneEnabled: z.boolean().default(DEFAULT_RX_ACK_TONE_ENABLED),
   })
   .default({});
 

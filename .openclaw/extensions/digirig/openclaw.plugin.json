@@ -1,112 +1,105 @@
 {
   "id": "digirig",
-  "channels": ["digirig"],
-  "uiHints": {
-    "audio.inputDevice": {
-      "label": "Audio Input Device",
-      "placeholder": "hw:2,0",
-      "help": "ALSA capture device for RX (arecord)."
-    },
-    "audio.outputDevice": {
-      "label": "Audio Output Device",
-      "placeholder": "hw:2,0",
-      "help": "ALSA playback device for TX (aplay)."
-    },
-    "ptt": {
-      "label": "PTT"
-    },
-    "ptt.device": {
-      "label": "PTT USB Serial Port",
-      "placeholder": "/dev/ttyUSB0"
-    },
-    "ptt.rts": {
-      "label": "PTT RTS Enabled"
-    },
-    "ptt.leadMs": {
-      "label": "PTT Lead (ms)"
-    },
-    "ptt.tailMs": {
-      "label": "PTT Tail (ms)"
-    },
-    "rx.energyThreshold": {
-      "label": "RX Energy Threshold"
-    },
-    "rx.preRollMs": {
-      "label": "RX Pre-Roll (ms)"
-    },
-    "rx.minSpeechMs": {
-      "label": "RX Min Speech (ms)"
-    },
-    "rx.maxSilenceMs": {
-      "label": "RX Max Silence (ms)"
-    },
-    "rx.maxRecordMs": {
-      "label": "RX Max Record (ms)"
-    },
-    "rx.busyHoldMs": {
-      "label": "RX Busy Hold (ms)"
-    },
-    "stt": {
-      "label": "Speech Recognition"
-    },
-    "stt.command": {
-      "label": "Speech Recognition Command",
-      "advanced": true
-    },
-    "stt.args": {
-      "label": "Speech Recognition Arguments",
-      "advanced": true,
-      "help": "Space-separated args; wrap items with spaces in quotes."
-    },
-    "stt.timeoutMs": {
-      "label": "Speech Recognition Timeout (ms)",
-      "advanced": true
-    }
-  },
+  "channels": [
+    "digirig"
+  ],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "enabled": { "type": "boolean" },
+      "enabled": {
+        "type": "boolean"
+      },
       "audio": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "inputDevice": { "type": "string" },
-          "outputDevice": { "type": "string" },
-          "sampleRate": { "type": "integer", "minimum": 1 }
+          "inputDevice": {
+            "type": "string"
+          },
+          "outputDevice": {
+            "type": "string"
+          },
+          "sampleRate": {
+            "type": "integer",
+            "minimum": 1
+          }
         }
       },
       "ptt": {
         "type": "object",
+        "title": "PTT",
         "additionalProperties": false,
         "properties": {
-          "device": { "type": "string" },
-          "rts": { "type": "boolean" },
-          "leadMs": { "type": "integer", "minimum": 0 },
-          "tailMs": { "type": "integer", "minimum": 0 }
+          "device": {
+            "type": "string"
+          },
+          "rts": {
+            "type": "boolean"
+          },
+          "leadMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "tailMs": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       },
       "rx": {
         "type": "object",
+        "title": "RX",
         "additionalProperties": false,
         "properties": {
-          "energyThreshold": { "type": "number", "minimum": 0 },
-          "frameMs": { "type": "integer", "minimum": 5 },
-          "preRollMs": { "type": "integer", "minimum": 0 },
-          "minSpeechMs": { "type": "integer", "minimum": 50 },
-          "maxSilenceMs": { "type": "integer", "minimum": 100 },
-          "maxRecordMs": { "type": "integer", "minimum": 1000 },
-          "busyHoldMs": { "type": "integer", "minimum": 50 }
+          "energyThreshold": {
+            "type": "number",
+            "minimum": 0
+          },
+          "frameMs": {
+            "type": "integer",
+            "minimum": 5
+          },
+          "preRollMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minSpeechMs": {
+            "type": "integer",
+            "minimum": 50
+          },
+          "maxSilenceMs": {
+            "type": "integer",
+            "minimum": 100
+          },
+          "maxRecordMs": {
+            "type": "integer",
+            "minimum": 1000
+          },
+          "busyHoldMs": {
+            "type": "integer",
+            "minimum": 50
+          },
+          "ackToneEnabled": {
+            "type": "boolean"
+          }
         }
       },
       "stt": {
         "type": "object",
+        "title": "Speech Recognition",
         "additionalProperties": false,
         "properties": {
-          "command": { "type": "string" },
-          "args": { "type": "string" },
-          "timeoutMs": { "type": "integer", "minimum": 1000 }
+          "command": {
+            "type": "string"
+          },
+          "args": {
+            "type": "string"
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1000
+          }
         }
       }
     }
