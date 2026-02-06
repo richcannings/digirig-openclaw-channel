@@ -16,5 +16,6 @@ describe("DigirigConfigSchema", () => {
     expect(result.rx.frameMs).toBe(20);
     expect(result.stt.command).toBe("whisper");
     expect(result.stt.streamUrl).toBe("");
+    expect(result.stt.streamIntervalMs).toBe(800);
   });
 });

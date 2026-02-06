@@ -18,7 +18,9 @@ import {
   DEFAULT_STT_COMMAND,
   DEFAULT_STT_MODE,
   DEFAULT_STT_STREAM_AUTH,
+  DEFAULT_STT_STREAM_INTERVAL_MS,
   DEFAULT_STT_STREAM_URL,
+  DEFAULT_STT_STREAM_WINDOW_MS,
   DEFAULT_STT_TIMEOUT_MS,
 } from "./defaults.js";
 
@@ -58,6 +60,8 @@ const DigirigSttSchema = z.object({
   timeoutMs: z.number().int().min(1000).default(DEFAULT_STT_TIMEOUT_MS),
   streamUrl: z.string().default(DEFAULT_STT_STREAM_URL),
   streamAuth: z.string().default(DEFAULT_STT_STREAM_AUTH),
+  streamIntervalMs: z.number().int().min(0).default(DEFAULT_STT_STREAM_INTERVAL_MS),
+  streamWindowMs: z.number().int().min(0).default(DEFAULT_STT_STREAM_WINDOW_MS),
 });
 
 export const DigirigConfigSchema = z.object({

@@ -20,3 +20,5 @@ export const DEFAULT_STT_ARGS = ["{input}"]; // prints to stdout
 export const DEFAULT_STT_TIMEOUT_MS = 15000;
 export const DEFAULT_STT_STREAM_URL = "";
 export const DEFAULT_STT_STREAM_AUTH = "";
+export const DEFAULT_STT_STREAM_INTERVAL_MS = 800;
+export const DEFAULT_STT_STREAM_WINDOW_MS = 4000;

@@ -51,7 +51,7 @@
     },
     "stt.mode": {
       "label": "Speech Recognition Mode",
-      "help": "command = spawn a local CLI; stream = send PCM frames to a websocket STT service."
+      "help": "command = spawn a local CLI; stream = POST WAVs to a local whisper.cpp server."
     },
     "stt.command": {
       "label": "Speech Recognition Command",
@@ -68,12 +68,22 @@
     },
     "stt.streamUrl": {
       "label": "Speech Recognition Stream URL",
-      "help": "WebSocket URL for streaming STT (ws:// or wss://).",
+      "help": "Full inference endpoint for whisper.cpp server (e.g. http://127.0.0.1:18080/inference).",
       "advanced": true
     },
     "stt.streamAuth": {
       "label": "Speech Recognition Stream Auth",
       "help": "Bearer token for the streaming STT service.",
+      "advanced": true
+    },
+    "stt.streamIntervalMs": {
+      "label": "Stream Partial Interval (ms)",
+      "help": "How often to send rolling window audio for partial inference while recording.",
+      "advanced": true
+    },
+    "stt.streamWindowMs": {
+      "label": "Stream Window (ms)",
+      "help": "Rolling window size for partial inference requests.",
       "advanced": true
     }
   },
@@ -123,7 +133,9 @@
           "args": { "type": "string" },
           "timeoutMs": { "type": "integer", "minimum": 1000 },
           "streamUrl": { "type": "string" },
-          "streamAuth": { "type": "string" }
+          "streamAuth": { "type": "string" },
+          "streamIntervalMs": { "type": "integer", "minimum": 0 },
+          "streamWindowMs": { "type": "integer", "minimum": 0 }
         }
       }
     }

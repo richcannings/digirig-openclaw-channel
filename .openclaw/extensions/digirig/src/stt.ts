@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { pcmToWav } from "./wav.js";
 
 export type SttMode = "command" | "stream";
 
@@ -9,6 +10,8 @@ export type SttConfig = {
   timeoutMs: number;
   streamUrl?: string;
   streamAuth?: string;
+  streamIntervalMs?: number;
+  streamWindowMs?: number;
 };
 
 export type StreamingSttSession = {
@@ -69,147 +72,97 @@ export function createStreamingSttClient(config: SttConfig): StreamingSttClient 
     throw new Error("stt.streamUrl is required for streaming mode");
   }
 
-  type WebSocketLike = {
-    readyState: number;
-    send: (data: any) => void;
-    close: () => void;
-    addEventListener: (type: string, listener: (evt: any) => void) => void;
-  };
-
-  const WebSocketCtor: any = (globalThis as any).WebSocket;
-  if (!WebSocketCtor) {
-    throw new Error("WebSocket is not available in this runtime");
+  const headers: Record<string, string> = {};
+  if (config.streamAuth) {
+    headers.Authorization = `Bearer ${config.streamAuth}`;
   }
 
-  let ws: WebSocketLike | null = null;
-  let connecting: Promise<void> | null = null;
-  let nextId = 1;
-  const pending = new Map<
-    number,
-    { resolve: (text: string) => void; reject: (err: Error) => void; timeout?: NodeJS.Timeout }
-  >();
+  const streamIntervalMs = Math.max(0, config.streamIntervalMs ?? 0);
+  const streamWindowMs = Math.max(0, config.streamWindowMs ?? 0);
 
-  const ensureWs = async () => {
-    if (ws && ws.readyState === 1) {
-      return;
-    }
-    if (connecting) {
-      await connecting;
-      return;
-    }
-    connecting = new Promise<void>((resolve, reject) => {
-      const headers: Record<string, string> = {};
-      if (config.streamAuth) {
-        headers.Authorization = `Bearer ${config.streamAuth}`;
-      }
-      const socket = new WebSocketCtor(config.streamUrl!, { headers });
-      ws = socket;
+  const submitInference = async (pcm: Buffer, sampleRate: number, channels: number) => {
+    const wav = pcmToWav(pcm, sampleRate, channels);
+    const form = new FormData();
+    form.append("file", new Blob([wav], { type: "audio/wav" }), "audio.wav");
+    form.append("response_format", "json");
+    form.append("temperature", "0");
 
-      const cleanup = () => {
-        connecting = null;
-      };
-
-      socket.addEventListener("open", () => {
-        cleanup();
-        resolve();
-      });
-      socket.addEventListener("error", (evt) => {
-        cleanup();
-        reject(new Error(`stt websocket error: ${String((evt as ErrorEvent).message ?? evt)}`));
-      });
-      socket.addEventListener("close", () => {
-        cleanup();
-        const err = new Error("stt websocket closed");
-        for (const [, entry] of pending) {
-          entry.reject(err);
-        }
-        pending.clear();
-      });
-      socket.addEventListener("message", (evt) => {
-        if (typeof evt.data !== "string") {
-          return;
-        }
-        let msg: any;
-        try {
-          msg = JSON.parse(evt.data);
-        } catch {
-          return;
-        }
-        const id = Number(msg?.id ?? 0);
-        if (!id || !pending.has(id)) {
-          return;
-        }
-        if (msg.type === "final") {
-          const entry = pending.get(id)!;
-          if (entry.timeout) {
-            clearTimeout(entry.timeout);
-          }
-          pending.delete(id);
-          entry.resolve(String(msg.text ?? ""));
-        } else if (msg.type === "error") {
-          const entry = pending.get(id)!;
-          if (entry.timeout) {
-            clearTimeout(entry.timeout);
-          }
-          pending.delete(id);
-          entry.reject(new Error(String(msg.error ?? "stt stream error")));
-        }
-      });
+    const response = await fetch(config.streamUrl!, {
+      method: "POST",
+      headers,
+      body: form,
     });
-    await connecting;
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(`stt stream http ${response.status}: ${text}`);
+    }
+
+    const json = (await response.json()) as { text?: string };
+    return String(json?.text ?? "");
   };
 
   return {
     startSession: async ({ sampleRate, channels }) => {
-      await ensureWs();
-      if (!ws || ws.readyState !== 1) {
-        throw new Error("stt websocket not connected");
-      }
-      const id = nextId++;
-      ws.send(
-        JSON.stringify({
-          type: "start",
-          id,
-          format: "pcm_s16le",
-          sampleRate,
-          channels,
-        }),
-      );
+      let buffers: Buffer[] = [];
+      let totalBytes = 0;
+      let lastPartialAt = 0;
+      let partialInFlight = false;
+      let cancelled = false;
+
+      const maybeRunPartial = () => {
+        if (streamIntervalMs <= 0 || partialInFlight || cancelled) {
+          return;
+        }
+        const now = Date.now();
+        if (now - lastPartialAt < streamIntervalMs) {
+          return;
+        }
+        lastPartialAt = now;
+        partialInFlight = true;
+
+        const pcm = Buffer.concat(buffers, totalBytes);
+        let windowed = pcm;
+        if (streamWindowMs > 0) {
+          const bytesPerMs = Math.floor((sampleRate * channels * 2) / 1000);
+          const windowBytes = streamWindowMs * bytesPerMs;
+          if (windowBytes > 0 && pcm.length > windowBytes) {
+            windowed = pcm.subarray(pcm.length - windowBytes);
+          }
+        }
+
+        submitInference(windowed, sampleRate, channels)
+          .catch(() => undefined)
+          .finally(() => {
+            partialInFlight = false;
+          });
+      };
 
       return {
         push: (frame) => {
-          if (!ws || ws.readyState !== 1) {
+          if (cancelled) {
             return;
           }
-          ws.send(frame);
+          buffers.push(frame);
+          totalBytes += frame.length;
+          maybeRunPartial();
         },
-        finalize: () =>
-          new Promise<string>((resolve, reject) => {
-            if (!ws || ws.readyState !== 1) {
-              reject(new Error("stt websocket not connected"));
-              return;
-            }
-            const timeout = setTimeout(() => {
-              pending.delete(id);
-              reject(new Error("stt stream timeout"));
-            }, config.timeoutMs);
-            pending.set(id, { resolve, reject, timeout });
-            ws.send(JSON.stringify({ type: "end", id }));
-          }),
-        cancel: () => {
-          if (!ws || ws.readyState !== 1) {
-            return;
+        finalize: async () => {
+          if (cancelled) {
+            return "";
           }
-          ws.send(JSON.stringify({ type: "cancel", id }));
-          pending.delete(id);
+          const pcm = Buffer.concat(buffers, totalBytes);
+          return submitInference(pcm, sampleRate, channels);
+        },
+        cancel: () => {
+          cancelled = true;
+          buffers = [];
+          totalBytes = 0;
         },
       };
     },
     close: () => {
-      if (ws && ws.readyState === 1) {
-        ws.close();
-      }
-      ws = null;
+      // no persistent connection to close
     },
   };
 }
