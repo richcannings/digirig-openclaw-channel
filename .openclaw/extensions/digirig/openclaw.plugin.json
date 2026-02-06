@@ -12,6 +12,9 @@
       "placeholder": "hw:2,0",
       "help": "ALSA playback device for TX (aplay)."
     },
+    "ptt": {
+      "label": "PTT"
+    },
     "ptt.device": {
       "label": "PTT USB Serial Port",
       "placeholder": "/dev/ttyUSB0"
@@ -42,6 +45,9 @@
     },
     "rx.busyHoldMs": {
       "label": "RX Busy Hold (ms)"
+    },
+    "stt": {
+      "label": "Speech Recognition"
     },
     "stt.command": {
       "label": "Speech Recognition Command",
