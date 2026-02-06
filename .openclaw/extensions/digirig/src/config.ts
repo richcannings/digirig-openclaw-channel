@@ -8,7 +8,6 @@ import {
   DEFAULT_PTT_LEAD_MS,
   DEFAULT_PTT_TAIL_MS,
   DEFAULT_RX_BUSY_HOLD_MS,
-  DEFAULT_RX_ACK_TONE_ENABLED,
   DEFAULT_RX_ENERGY_THRESHOLD,
   DEFAULT_RX_FRAME_MS,
   DEFAULT_RX_MAX_RECORD_MS,
@@ -17,6 +16,9 @@ import {
   DEFAULT_RX_PRE_ROLL_MS,
   DEFAULT_STT_ARGS,
   DEFAULT_STT_COMMAND,
+  DEFAULT_STT_MODE,
+  DEFAULT_STT_STREAM_AUTH,
+  DEFAULT_STT_STREAM_URL,
   DEFAULT_STT_TIMEOUT_MS,
 } from "./defaults.js";
 
@@ -46,14 +48,16 @@ const DigirigRxSchema = z
     maxSilenceMs: z.number().int().min(100).default(DEFAULT_RX_MAX_SILENCE_MS),
     maxRecordMs: z.number().int().min(1000).default(DEFAULT_RX_MAX_RECORD_MS),
     busyHoldMs: z.number().int().min(50).default(DEFAULT_RX_BUSY_HOLD_MS),
-    ackToneEnabled: z.boolean().default(DEFAULT_RX_ACK_TONE_ENABLED),
   })
   .default({});
 
 const DigirigSttSchema = z.object({
+  mode: z.enum(["command", "stream"]).default(DEFAULT_STT_MODE),
   command: z.string().min(1, "stt.command is required").default(DEFAULT_STT_COMMAND),
   args: z.string().default(DEFAULT_STT_ARGS.join(" ")),
   timeoutMs: z.number().int().min(1000).default(DEFAULT_STT_TIMEOUT_MS),
+  streamUrl: z.string().default(DEFAULT_STT_STREAM_URL),
+  streamAuth: z.string().default(DEFAULT_STT_STREAM_AUTH),
 });
 
 export const DigirigConfigSchema = z.object({

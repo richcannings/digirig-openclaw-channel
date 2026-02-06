@@ -5,6 +5,7 @@ describe("DigirigConfigSchema", () => {
   it("uses default stt.command", () => {
     const result = DigirigConfigSchema.parse({ stt: {} });
     expect(result.stt.command).toBe("faster-whisper");
+    expect(result.stt.mode).toBe("command");
   });
 
   it("applies defaults", () => {
@@ -14,5 +15,6 @@ describe("DigirigConfigSchema", () => {
     expect(result.ptt.device).toBe("/dev/ttyUSB0");
     expect(result.rx.frameMs).toBe(20);
     expect(result.stt.command).toBe("whisper");
+    expect(result.stt.streamUrl).toBe("");
   });
 });

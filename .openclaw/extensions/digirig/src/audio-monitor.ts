@@ -38,17 +38,12 @@ export class AudioMonitor extends EventEmitter {
   private stallTimer: NodeJS.Timeout | null = null;
   private preRollFrames: Buffer[] = [];
   private preRollMaxFrames: number;
-  private frameMs: number;
-  private frameBytes: number;
 
   constructor(config: AudioMonitorConfig) {
     super();
     this.config = config;
-    this.frameMs = Math.max(5, config.frameMs);
-    this.preRollMaxFrames = Math.ceil(config.preRollMs / this.frameMs);
-    this.frameBytes = Math.floor(
-      (this.config.sampleRate * this.config.channels * 2 * this.frameMs) / 1000,
-    );
+    const frameMs = Math.max(5, config.frameMs);
+    this.preRollMaxFrames = Math.ceil(config.preRollMs / frameMs);
   }
 
   start(): void {
@@ -110,8 +105,12 @@ export class AudioMonitor extends EventEmitter {
   }
 
   private handleChunk(chunk: Buffer): void {
-    for (let offset = 0; offset + this.frameBytes <= chunk.length; offset += this.frameBytes) {
-      const frame = chunk.subarray(offset, offset + this.frameBytes);
+    const frameBytes = Math.floor(
+      (this.config.sampleRate * this.config.channels * 2 * this.config.frameMs) / 1000,
+    );
+
+    for (let offset = 0; offset + frameBytes <= chunk.length; offset += frameBytes) {
+      const frame = chunk.subarray(offset, offset + frameBytes);
       const energy = computeRms(frame);
       this.emit("energy", energy);
 
@@ -137,9 +136,10 @@ export class AudioMonitor extends EventEmitter {
 
       if (this.recording) {
         this.utteranceBuffers.push(frame);
-        this.utteranceMs += this.frameMs;
+        this.emit("recording-data", { frame, energy, at: Date.now() });
+        this.utteranceMs += this.config.frameMs;
         if (energy < this.config.energyThreshold) {
-          this.silenceMs += this.frameMs;
+          this.silenceMs += this.config.frameMs;
         } else {
           this.silenceMs = 0;
         }

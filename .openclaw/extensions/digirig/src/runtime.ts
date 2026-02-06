@@ -6,7 +6,7 @@ import { getDigirigRuntime } from "./state.js";
 import type { DigirigConfig } from "./config.js";
 import { AudioMonitor } from "./audio-monitor.js";
 import { PttController } from "./ptt.js";
-import { runStt } from "./stt.js";
+import { createStreamingSttClient, runStt, type StreamingSttSession } from "./stt.js";
 import { pcmToWav } from "./wav.js";
 import { playPcm, synthesizeTts } from "./tts.js";
 
@@ -28,37 +28,6 @@ export type DigirigRuntime = {
   stop: () => Promise<void>;
   speak: (text: string) => Promise<void>;
 };
-
-const ACK_TONE_HZ = 880;
-const ACK_TONE_MS = 200;
-
-function buildAckTonePcm(sampleRate: number, durationMs: number, frequencyHz: number): Buffer {
-  const totalSamples = Math.floor((sampleRate * durationMs) / 1000);
-  const pcm = Buffer.alloc(totalSamples * 2);
-  const amplitude = 0.2;
-  for (let i = 0; i < totalSamples; i += 1) {
-    const t = i / sampleRate;
-    const sample = Math.sin(2 * Math.PI * frequencyHz * t) * amplitude;
-    const value = Math.max(-1, Math.min(1, sample));
-    pcm.writeInt16LE(Math.floor(value * 32767), i * 2);
-  }
-  return pcm;
-}
-
-async function playAckTone(config: DigirigConfig, ptt: PttController): Promise<void> {
-  if (!config.ptt.rts) {
-    return;
-  }
-  const pcm = buildAckTonePcm(config.audio.sampleRate, ACK_TONE_MS, ACK_TONE_HZ);
-  await ptt.withTx(async () => {
-    await playPcm({
-      device: config.audio.outputDevice,
-      sampleRate: config.audio.sampleRate,
-      channels: 1,
-      pcm,
-    });
-  });
-}
 
 export async function createDigirigRuntime(config: DigirigConfig): Promise<DigirigRuntime> {
   const runtime = getDigirigRuntime();
@@ -82,6 +51,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     tailMs: config.ptt.tailMs,
   });
 
+  const sttClient = config.stt.mode === "stream" ? createStreamingSttClient(config.stt) : null;
+
   let stopped = false;
   let outboundQueue: Promise<void> = Promise.resolve();
 
@@ -93,9 +64,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       return;
     }
     outboundQueue = outboundQueue.then(async () => {
+      const ttsPromise = synthesizeTts(runtime, text);
       await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 2000);
+      const tts = await ttsPromise;
       await ptt.withTx(async () => {
-        const tts = await synthesizeTts(runtime, text);
         await playPcm({
           device: config.audio.outputDevice,
           sampleRate: tts.sampleRate,
@@ -105,6 +77,87 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       });
     });
     await outboundQueue;
+  };
+
+  const handleTranscript = async (ctx: ChannelGatewayStartContext<DigirigConfig>, text: string) => {
+    const trimmed = text.trim();
+    ctx.log?.info?.(`[digirig] STT: ${trimmed || "(empty)"}`);
+    if (!trimmed) {
+      return;
+    }
+
+    const cfg = runtime.config.loadConfig();
+    const route = runtime.channel.routing.resolveAgentRoute({
+      cfg,
+      channel: "digirig",
+      accountId: "default",
+      peer: {
+        kind: "direct",
+        id: "radio",
+      },
+    });
+
+    const envelopeOptions = runtime.channel.reply.resolveEnvelopeFormatOptions(cfg);
+    const body = runtime.channel.reply.formatAgentEnvelope({
+      channel: "DigiRig",
+      from: "radio",
+      timestamp: Date.now(),
+      envelope: envelopeOptions,
+      body: trimmed,
+    });
+
+    const ctxPayload = runtime.channel.reply.finalizeInboundContext({
+      Body: body,
+      RawBody: trimmed,
+      CommandBody: trimmed,
+      From: "digirig:radio",
+      To: "digirig:radio",
+      SessionKey: route.sessionKey,
+      AccountId: route.accountId,
+      ChatType: "direct",
+      ConversationLabel: "radio",
+      SenderName: "radio",
+      SenderId: "radio",
+      Provider: "digirig",
+      Surface: "digirig",
+      MessageSid: `digirig-${Date.now()}`,
+      OriginatingChannel: "digirig",
+      OriginatingTo: "digirig:radio",
+    });
+
+    const storePath = runtime.channel.session.resolveStorePath(cfg.session?.store, {
+      agentId: route.agentId,
+    });
+    await runtime.channel.session.recordInboundSession({
+      storePath,
+      sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+      ctx: ctxPayload,
+      onRecordError: (err) => ctx.log?.error?.(`[digirig] session record error: ${String(err)}`),
+    });
+
+    const { dispatcher, replyOptions, markDispatchIdle } =
+      runtime.channel.reply.createReplyDispatcherWithTyping({
+        deliver: async (payload, info) => {
+          if (!payload.text) {
+            return;
+          }
+          const isFinal = info?.kind === "final";
+          const txText = isFinal ? appendCallsign(payload.text) : payload.text;
+          audioMonitor.muteFor(800);
+          await speak(txText);
+          audioMonitor.muteFor(800);
+        },
+        onError: (err, info) =>
+          ctx.log?.error?.(`[digirig] ${info.kind} reply failed: ${String(err)}`),
+      });
+
+    await runtime.channel.reply.dispatchReplyFromConfig({
+      ctx: ctxPayload,
+      cfg,
+      dispatcher,
+      replyOptions,
+    });
+    markDispatchIdle();
   };
 
   const start = async (ctx: ChannelGatewayStartContext<DigirigConfig>) => {
@@ -120,107 +173,60 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     audioMonitor.on("recording-end", (evt) =>
       ctx.log?.info?.(`[digirig] RX end (durationMs=${evt?.durationMs ?? "?"})`),
     );
-    audioMonitor.on("utterance", async (utterance) => {
+
+    let streamSession: StreamingSttSession | null = null;
+
+    audioMonitor.on("recording-start", async () => {
+      if (!sttClient) {
+        return;
+      }
       try {
-        const filePath = await writeTempWav(utterance);
-        let text = "";
-        try {
-          text = await runStt({
-            config: config.stt,
-            inputPath: filePath,
-            sampleRate: utterance.sampleRate,
-          });
-        } finally {
-          await fs.unlink(filePath).catch(() => undefined);
-        }
-        ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
-        if (!text.trim()) {
-          return;
-        }
-
-        if (config.rx.ackToneEnabled) {
-          try {
-            audioMonitor.muteFor(400);
-            await playAckTone(config, ptt);
-            audioMonitor.muteFor(400);
-          } catch (toneErr) {
-            ctx.log?.error?.(`[digirig] ack tone failed: ${String(toneErr)}`);
-          }
-        }
-
-        const cfg = runtime.config.loadConfig();
-        const route = runtime.channel.routing.resolveAgentRoute({
-          cfg,
-          channel: "digirig",
-          accountId: "default",
-          peer: {
-            kind: "direct",
-            id: "radio",
-          },
+        streamSession = await sttClient.startSession({
+          sampleRate: config.audio.sampleRate,
+          channels: 1,
         });
+      } catch (err) {
+        ctx.log?.error?.(`[digirig] stt stream start error: ${String(err)}`);
+        streamSession = null;
+      }
+    });
 
-        const envelopeOptions = runtime.channel.reply.resolveEnvelopeFormatOptions(cfg);
-        const body = runtime.channel.reply.formatAgentEnvelope({
-          channel: "DigiRig",
-          from: "radio",
-          timestamp: Date.now(),
-          envelope: envelopeOptions,
-          body: text,
-        });
+    audioMonitor.on("recording-data", (evt) => {
+      if (!streamSession) {
+        return;
+      }
+      streamSession.push(evt.frame as Buffer);
+    });
 
-        const ctxPayload = runtime.channel.reply.finalizeInboundContext({
-          Body: body,
-          RawBody: text,
-          CommandBody: text,
-          From: "digirig:radio",
-          To: "digirig:radio",
-          SessionKey: route.sessionKey,
-          AccountId: route.accountId,
-          ChatType: "direct",
-          ConversationLabel: "radio",
-          SenderName: "radio",
-          SenderId: "radio",
-          Provider: "digirig",
-          Surface: "digirig",
-          MessageSid: `digirig-${Date.now()}`,
-          OriginatingChannel: "digirig",
-          OriginatingTo: "digirig:radio",
-        });
+    audioMonitor.on("recording-end", async () => {
+      if (!streamSession) {
+        return;
+      }
+      const session = streamSession;
+      streamSession = null;
+      try {
+        const text = await session.finalize();
+        await handleTranscript(ctx, text);
+      } catch (err) {
+        ctx.log?.error?.(`[digirig] stt stream error: ${String(err)}`);
+      }
+    });
 
-        const storePath = runtime.channel.session.resolveStorePath(cfg.session?.store, {
-          agentId: route.agentId,
+    audioMonitor.on("utterance", async (utterance) => {
+      if (sttClient) {
+        return;
+      }
+      try {
+        const wav = pcmToWav(utterance.pcm, utterance.sampleRate, utterance.channels);
+        const filePath = join(tmpdir(), `digirig-${Date.now()}.wav`);
+        await fs.writeFile(filePath, wav);
+        const text = await runStt({
+          config: config.stt,
+          inputPath: filePath,
+          sampleRate: utterance.sampleRate,
         });
-        await runtime.channel.session.recordInboundSession({
-          storePath,
-          sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
-          ctx: ctxPayload,
-          onRecordError: (err) =>
-            ctx.log?.error?.(`[digirig] session record error: ${String(err)}`),
-        });
-
-        const { dispatcher, replyOptions, markDispatchIdle } =
-          runtime.channel.reply.createReplyDispatcherWithTyping({
-            deliver: async (payload, info) => {
-              if (!payload.text) {
-                return;
-              }
-              const isFinal = info?.kind === "final";
-              const txText = isFinal ? appendCallsign(payload.text) : payload.text;
-              audioMonitor.muteFor(800);
-              await speak(txText);
-              audioMonitor.muteFor(800);
-            },
-            onError: (err, info) =>
-              ctx.log?.error?.(`[digirig] ${info.kind} reply failed: ${String(err)}`),
-          });
-
-        await runtime.channel.reply.dispatchReplyFromConfig({
-          ctx: ctxPayload,
-          cfg,
-          dispatcher,
-          replyOptions,
-        });
-        markDispatchIdle();
+        await fs.unlink(filePath).catch(() => undefined);
+        await handleTranscript(ctx, text);
       } catch (err) {
         ctx.log?.error?.(`[digirig] inbound error: ${String(err)}`);
       }
@@ -240,6 +246,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     stopped = true;
     audioMonitor.stop();
     await ptt.close();
+    sttClient?.close();
   };
 
   return { start, stop, speak };
@@ -261,15 +268,4 @@ async function waitForClearChannel(
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function writeTempWav(utterance: {
-  pcm: Buffer;
-  sampleRate: number;
-  channels: number;
-}): Promise<string> {
-  const wav = pcmToWav(utterance.pcm, utterance.sampleRate, utterance.channels);
-  const filePath = join(tmpdir(), `digirig-${Date.now()}.wav`);
-  await fs.writeFile(filePath, wav);
-  return filePath;
 }
