@@ -6,7 +6,7 @@
 - **What to call them:** Rich
 - **Pronouns:** *(optional)*
 - **Timezone:** PST (America/Los_Angeles)
-- **Notes:** Prefers auto-transcription of WhatsApp voice notes. Located in Santa Cruz, California.
+- **Notes:** Prefers auto-transcription of WhatsApp voice notes. Located in Santa Cruz, California. Callsign for DigiRig TX: W6RGC/AI ("Whiskey Six Romeo Golf Charlie stroke Alpha India"). Reply on DigiRig when asked.
 
 ## Context
 
