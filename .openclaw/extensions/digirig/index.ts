@@ -10,7 +10,7 @@ const meta = {
   selectionLabel: "DigiRig (local audio/PTT)",
   detailLabel: "DigiRig Mobile",
   docsPath: "/channels/digirig",
-  blurb: "Local ham radio interface using DigiRig Mobile audio + PTT.",
+  blurb: "Link to ham radio using digirig.net and monitor connection health.",
   systemImage: "dot.radiowaves.left.and.right",
 };
 
@@ -50,7 +50,6 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
     isConfigured: (account) => Boolean(account.stt?.command?.trim()),
     describeAccount: (account) => ({
       accountId: DEFAULT_ACCOUNT_ID,
-      name: account.name,
       enabled: account.enabled ?? true,
       configured: Boolean(account.stt?.command?.trim()),
     }),

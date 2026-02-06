@@ -34,7 +34,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   const audioMonitor = new AudioMonitor({
     device: config.audio.inputDevice,
     sampleRate: config.audio.sampleRate,
-    channels: config.audio.channels,
+    channels: 1,
     frameMs: config.rx.frameMs,
     preRollMs: config.rx.preRollMs,
     energyThreshold: config.rx.energyThreshold,
@@ -68,7 +68,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         await playPcm({
           device: config.audio.outputDevice,
           sampleRate: tts.sampleRate,
-          channels: config.audio.channels,
+          channels: 1,
           pcm: tts.audioBuffer,
         });
       });

@@ -2,12 +2,48 @@ import { spawn } from "node:child_process";
 
 export type SttConfig = {
   command: string;
-  args: string[];
+  args: string;
   timeoutMs: number;
 };
 
-export function expandSttArgs(args: string[], inputPath: string, sampleRate: number): string[] {
-  return args.map((arg) =>
+function parseArgs(raw: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let quote: "" | '"' | "'" = "";
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (quote) {
+      if (ch === quote) {
+        quote = "";
+      } else if (ch === "\\" && i + 1 < raw.length) {
+        i += 1;
+        current += raw[i];
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+    if (ch.trim() === "") {
+      if (current) {
+        args.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += ch;
+  }
+  if (current) {
+    args.push(current);
+  }
+  return args;
+}
+
+export function expandSttArgs(args: string, inputPath: string, sampleRate: number): string[] {
+  return parseArgs(args).map((arg) =>
     arg.replaceAll("{input}", inputPath).replaceAll("{sr}", String(sampleRate)),
   );
 }

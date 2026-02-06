@@ -24,7 +24,6 @@ const DigirigAudioSchema = z
     inputDevice: z.string().default(DEFAULT_AUDIO_DEVICE),
     outputDevice: z.string().default(DEFAULT_AUDIO_DEVICE),
     sampleRate: z.number().int().positive().default(DEFAULT_AUDIO_SAMPLE_RATE),
-    channels: z.number().int().min(1).max(2).default(DEFAULT_AUDIO_CHANNELS),
   })
   .default({});
 
@@ -51,12 +50,11 @@ const DigirigRxSchema = z
 
 const DigirigSttSchema = z.object({
   command: z.string().min(1, "stt.command is required").default(DEFAULT_STT_COMMAND),
-  args: z.array(z.string()).default(DEFAULT_STT_ARGS),
+  args: z.string().default(DEFAULT_STT_ARGS.join(" ")),
   timeoutMs: z.number().int().min(1000).default(DEFAULT_STT_TIMEOUT_MS),
 });
 
 export const DigirigConfigSchema = z.object({
-  name: z.string().optional(),
   enabled: z.boolean().optional().default(true),
   audio: DigirigAudioSchema,
   ptt: DigirigPttSchema,
