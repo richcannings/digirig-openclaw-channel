@@ -158,7 +158,8 @@ export class AudioMonitor extends EventEmitter {
         const recordExceeded = this.utteranceMs >= this.config.maxRecordMs;
 
         if ((minSpeechMet && silenceExceeded) || recordExceeded) {
-          this.finishUtterance();
+          const reason = recordExceeded ? "maxRecord" : "silence";
+          this.finishUtterance(reason);
         }
       }
     }
@@ -174,10 +175,15 @@ export class AudioMonitor extends EventEmitter {
     }
   }
 
-  private finishUtterance(): void {
+  private finishUtterance(reason: "silence" | "maxRecord"): void {
     const pcm = Buffer.concat(this.utteranceBuffers);
     this.recording = false;
-    this.emit("recording-end", { durationMs: this.utteranceMs, at: Date.now() });
+    this.emit("recording-end", {
+      durationMs: this.utteranceMs,
+      silenceMs: this.silenceMs,
+      reason,
+      at: Date.now(),
+    });
     this.utteranceBuffers = [];
     this.utteranceMs = 0;
     this.silenceMs = 0;

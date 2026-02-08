@@ -101,7 +101,11 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     let lastRxEndAt = 0;
     audioMonitor.on("recording-end", (evt) => {
       lastRxEndAt = Date.now();
-      ctx.log?.info?.(`[digirig] RX end (durationMs=${evt?.durationMs ?? "?"})`);
+      const reason = evt?.reason ?? "?";
+      const silenceMs = evt?.silenceMs ?? "?";
+      ctx.log?.info?.(
+        `[digirig] RX end (durationMs=${evt?.durationMs ?? "?"}, silenceMs=${silenceMs}, reason=${reason})`,
+      );
     });
     audioMonitor.on("utterance", async (utterance) => {
       try {
@@ -111,6 +115,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         const filePath = join(tmpdir(), `digirig-${Date.now()}.wav`);
         await fs.writeFile(filePath, wav);
         const sttStartAt = Date.now();
+        ctx.log?.info?.(
+          `[digirig] STT start (rxToSttStartMs=${sttStartAt - rxEndAt})`,
+        );
         let text = "";
         try {
           text = await runStt({
