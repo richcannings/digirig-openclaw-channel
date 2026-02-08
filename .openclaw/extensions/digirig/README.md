@@ -2,9 +2,19 @@
 
 Local ham radio RX/TX via DigiRig audio + PTT.
 
-## Install (fresh OpenClaw)
-1) Clone OpenClaw (or update your existing checkout).
-2) Install the plugin from the extension path:
+## Install from ZIP (fresh OpenClaw)
+1) Download the plugin ZIP.
+2) Extract it somewhere on disk.
+3) Install deps and register the plugin:
+```bash
+unzip ~/digirig-openclaw-channel-1.0.zip -d ~/digirig-openclaw-channel-1.0
+cd ~/digirig-openclaw-channel-1.0
+npm install
+openclaw plugins install -l ~/digirig-openclaw-channel-1.0
+openclaw gateway restart
+```
+
+## Install from source
 ```bash
 openclaw plugins install -l /path/to/openclaw/.openclaw/extensions/digirig
 openclaw gateway restart
