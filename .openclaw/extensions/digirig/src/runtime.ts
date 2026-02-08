@@ -106,12 +106,16 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         const wav = pcmToWav(utterance.pcm, utterance.sampleRate, utterance.channels);
         const filePath = join(tmpdir(), `digirig-${Date.now()}.wav`);
         await fs.writeFile(filePath, wav);
-        const text = await runStt({
-          config: config.stt,
-          inputPath: filePath,
-          sampleRate: utterance.sampleRate,
-        });
-        await fs.unlink(filePath).catch(() => undefined);
+        let text = "";
+        try {
+          text = await runStt({
+            config: config.stt,
+            inputPath: filePath,
+            sampleRate: utterance.sampleRate,
+          });
+        } finally {
+          await fs.unlink(filePath).catch(() => undefined);
+        }
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
         if (!text.trim()) {
           return;

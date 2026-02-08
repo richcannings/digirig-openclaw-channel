@@ -76,19 +76,20 @@ export async function runStt(params: {
     proc.kill("SIGKILL");
   }, config.timeoutMs);
 
-  const exitCode = await new Promise<number | null>((resolve, reject) => {
-    proc.on("error", (err) => reject(err));
-    proc.on("exit", (code) => resolve(code));
-  });
-  clearTimeout(timeout);
+  try {
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      proc.on("error", (err) => reject(err));
+      proc.on("exit", (code) => resolve(code));
+    });
 
-  if (exitCode !== 0) {
+    if (exitCode !== 0) {
+      throw new Error(stderr.trim() || `STT command failed (${exitCode})`);
+    }
+
+    const fileText = await fs.readFile(outputPath, "utf8").catch(() => "");
+    return (fileText || stdout).trim();
+  } finally {
+    clearTimeout(timeout);
     await fs.unlink(outputPath).catch(() => undefined);
-    throw new Error(stderr.trim() || `STT command failed (${exitCode})`);
   }
-
-  const fileText = await fs.readFile(outputPath, "utf8").catch(() => "");
-  await fs.unlink(outputPath).catch(() => undefined);
-
-  return (fileText || stdout).trim();
 }

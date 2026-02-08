@@ -45,6 +45,7 @@ export async function playPcm(params: {
   proc.stdin?.end();
 
   await new Promise<void>((resolve, reject) => {
+    proc.on("error", reject);
     proc.on("exit", (code) => {
       if (code === 0) {
         resolve();
