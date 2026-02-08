@@ -98,14 +98,19 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     audioMonitor.on("recording-start", (evt) =>
       ctx.log?.info?.(`[digirig] RX start (energy=${evt?.energy?.toFixed?.(4) ?? "?"})`),
     );
-    audioMonitor.on("recording-end", (evt) =>
-      ctx.log?.info?.(`[digirig] RX end (durationMs=${evt?.durationMs ?? "?"})`),
-    );
+    let lastRxEndAt = 0;
+    audioMonitor.on("recording-end", (evt) => {
+      lastRxEndAt = Date.now();
+      ctx.log?.info?.(`[digirig] RX end (durationMs=${evt?.durationMs ?? "?"})`);
+    });
     audioMonitor.on("utterance", async (utterance) => {
       try {
+        const rxEndAt = lastRxEndAt || Date.now();
+        const utteranceStartAt = Date.now();
         const wav = pcmToWav(utterance.pcm, utterance.sampleRate, utterance.channels);
         const filePath = join(tmpdir(), `digirig-${Date.now()}.wav`);
         await fs.writeFile(filePath, wav);
+        const sttStartAt = Date.now();
         let text = "";
         try {
           text = await runStt({
@@ -116,12 +121,14 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         } finally {
           await fs.unlink(filePath).catch(() => undefined);
         }
+        const sttEndAt = Date.now();
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
         if (!text.trim()) {
           return;
         }
 
         const cfg = runtime.config.loadConfig();
+        const routeStartAt = Date.now();
         const route = runtime.channel.routing.resolveAgentRoute({
           cfg,
           channel: "digirig",
@@ -131,6 +138,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             id: "radio",
           },
         });
+        const routeEndAt = Date.now();
 
         const envelopeOptions = runtime.channel.reply.resolveEnvelopeFormatOptions(cfg);
         const body = runtime.channel.reply.formatAgentEnvelope({
@@ -183,6 +191,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           accountId: route.accountId,
         });
 
+        const dispatchStartAt = Date.now();
+        let firstTxAt = 0;
+        let speakMs = 0;
         ctx.log?.info?.("[digirig] dispatch reply start");
         const dispatchResult = await runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
           ctx: ctxPayload,
@@ -200,7 +211,12 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
               const txText = appendCallsign(shortReply, config.tx.callsign);
               ctx.log?.info?.(`[digirig] reply deliver: ${txText}`);
               audioMonitor.muteFor(800);
+              if (!firstTxAt) {
+                firstTxAt = Date.now();
+              }
+              const speakStartAt = Date.now();
               await speak(txText);
+              speakMs = Date.now() - speakStartAt;
               audioMonitor.muteFor(800);
             },
             onError: (err, info) =>
@@ -212,9 +228,20 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             disableBlockStreaming: true,
           },
         });
+        const dispatchEndAt = Date.now();
         const counts = dispatchResult?.counts ?? {};
+        const timing = {
+          rxToSttStartMs: sttStartAt - rxEndAt,
+          sttMs: sttEndAt - sttStartAt,
+          routeMs: routeEndAt - routeStartAt,
+          dispatchMs: dispatchEndAt - dispatchStartAt,
+          rxToFirstTxMs: firstTxAt ? firstTxAt - rxEndAt : null,
+          speakMs: speakMs || null,
+          totalRxToDoneMs: dispatchEndAt - rxEndAt,
+          totalUtteranceToDoneMs: dispatchEndAt - utteranceStartAt,
+        };
         ctx.log?.info?.(
-          `[digirig] dispatch reply complete (counts=${JSON.stringify(counts)})`,
+          `[digirig] dispatch reply complete (counts=${JSON.stringify(counts)} timing=${JSON.stringify(timing)})`,
         );
       } catch (err) {
         ctx.log?.error?.(`[digirig] inbound error: ${String(err)}`);
