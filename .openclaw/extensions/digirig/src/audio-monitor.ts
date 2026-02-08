@@ -137,6 +137,11 @@ export class AudioMonitor extends EventEmitter {
         if (energy >= this.config.energyThreshold) {
           this.recording = true;
           this.emit("recording-start", { energy, at: Date.now() });
+          if (this.preRollFrames.length) {
+            for (const preRoll of this.preRollFrames) {
+              this.emit("recording-frame", preRoll);
+            }
+          }
           this.utteranceBuffers = this.preRollFrames.slice();
           this.preRollFrames = [];
           this.utteranceMs = 0;
@@ -145,6 +150,7 @@ export class AudioMonitor extends EventEmitter {
       }
 
       if (this.recording) {
+        this.emit("recording-frame", frame);
         this.utteranceBuffers.push(frame);
         this.utteranceMs += this.config.frameMs;
         if (energy < this.config.energyThreshold) {

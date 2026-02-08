@@ -1,12 +1,12 @@
 import { promises as fs } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createReplyPrefixOptions, type ChannelGatewayStartContext } from "openclaw/plugin-sdk";
 import { getDigirigRuntime } from "./state.js";
 import type { DigirigConfig } from "./config.js";
 import { AudioMonitor } from "./audio-monitor.js";
 import { PttController } from "./ptt.js";
-import { runStt } from "./stt.js";
+import { runStt, runSttStream } from "./stt.js";
 import { pcmToWav } from "./wav.js";
 import { playPcm, synthesizeTts } from "./tts.js";
 
@@ -65,6 +65,20 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
   let stopped = false;
   let outboundQueue: Promise<void> = Promise.resolve();
+  const logDir = join(homedir(), ".openclaw", "logs");
+  const logDate = new Date().toISOString().slice(0, 10);
+  const logPath = join(logDir, `digirig-${logDate}.log`);
+
+  const appendTranscript = async (line: string) => {
+    await fs.mkdir(logDir, { recursive: true });
+    await fs.appendFile(logPath, `${line}\n`);
+  };
+
+  const logTranscript = async (speaker: "RX" | "TX", text: string) => {
+    if (!text.trim()) return;
+    const ts = new Date().toISOString();
+    await appendTranscript(`[${ts}] ${speaker}: ${text.trim()}`);
+  };
 
   const speak = async (text: string) => {
     if (!text.trim()) {
@@ -99,6 +113,17 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       ctx.log?.info?.(`[digirig] RX start (energy=${evt?.energy?.toFixed?.(4) ?? "?"})`),
     );
     let lastRxEndAt = 0;
+    let recordingFrames: Buffer[] = [];
+    let streamTimer: NodeJS.Timeout | null = null;
+    let latestStreamText = "";
+    const frameBytes = Math.floor(
+      (config.audio.sampleRate * 1 * 2 * config.rx.frameMs) / 1000,
+    );
+    const streamWindowFrames = Math.max(
+      1,
+      Math.ceil(config.stt.streamWindowMs / config.rx.frameMs),
+    );
+
     audioMonitor.on("recording-end", (evt) => {
       lastRxEndAt = Date.now();
       const reason = evt?.reason ?? "?";
@@ -106,30 +131,74 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       ctx.log?.info?.(
         `[digirig] RX end (durationMs=${evt?.durationMs ?? "?"}, silenceMs=${silenceMs}, reason=${reason})`,
       );
+      if (streamTimer) {
+        clearInterval(streamTimer);
+        streamTimer = null;
+      }
     });
+
+    audioMonitor.on("recording-frame", (frame: Buffer) => {
+      if (!frameBytes || frame.length !== frameBytes) return;
+      recordingFrames.push(frame);
+      if (recordingFrames.length > streamWindowFrames * 4) {
+        recordingFrames = recordingFrames.slice(-streamWindowFrames * 2);
+      }
+    });
+
+    audioMonitor.on("recording-start", () => {
+      recordingFrames = [];
+      latestStreamText = "";
+      if (config.stt.mode === "stream") {
+        ctx.log?.info?.("[digirig] STT stream start");
+        if (streamTimer) clearInterval(streamTimer);
+        streamTimer = setInterval(async () => {
+          try {
+            const frames = recordingFrames.slice(-streamWindowFrames);
+            if (!frames.length) return;
+            const pcm = Buffer.concat(frames);
+            const wav = pcmToWav(pcm, config.audio.sampleRate, 1);
+            const text = await runSttStream({ config: config.stt, wavBuffer: wav });
+            if (text) latestStreamText = text;
+          } catch (err) {
+            ctx.log?.debug?.(`[digirig] STT stream error: ${String(err)}`);
+          }
+        }, config.stt.streamIntervalMs);
+      }
+    });
+
     audioMonitor.on("utterance", async (utterance) => {
       try {
         const rxEndAt = lastRxEndAt || Date.now();
         const utteranceStartAt = Date.now();
         const wav = pcmToWav(utterance.pcm, utterance.sampleRate, utterance.channels);
-        const filePath = join(tmpdir(), `digirig-${Date.now()}.wav`);
-        await fs.writeFile(filePath, wav);
         const sttStartAt = Date.now();
         ctx.log?.info?.(
           `[digirig] STT start (rxToSttStartMs=${sttStartAt - rxEndAt})`,
         );
         let text = "";
-        try {
-          text = await runStt({
-            config: config.stt,
-            inputPath: filePath,
-            sampleRate: utterance.sampleRate,
-          });
-        } finally {
-          await fs.unlink(filePath).catch(() => undefined);
+        if (config.stt.mode === "stream") {
+          try {
+            text = await runSttStream({ config: config.stt, wavBuffer: wav });
+          } catch (err) {
+            ctx.log?.error?.(`[digirig] STT stream failed: ${String(err)}`);
+            text = latestStreamText;
+          }
+        } else {
+          const filePath = join(tmpdir(), `digirig-${Date.now()}.wav`);
+          await fs.writeFile(filePath, wav);
+          try {
+            text = await runStt({
+              config: config.stt,
+              inputPath: filePath,
+              sampleRate: utterance.sampleRate,
+            });
+          } finally {
+            await fs.unlink(filePath).catch(() => undefined);
+          }
         }
         const sttEndAt = Date.now();
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
+        await logTranscript("RX", text);
         if (!text.trim()) {
           return;
         }
@@ -225,6 +294,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
               await speak(txText);
               speakMs = Date.now() - speakStartAt;
               audioMonitor.muteFor(800);
+              await logTranscript("TX", txText);
             },
             onError: (err, info) =>
               ctx.log?.error?.(`[digirig] ${info.kind} reply failed: ${String(err)}`),

@@ -18,3 +18,7 @@ export const DEFAULT_TX_CALLSIGN = "W6RGC/AI";
 export const DEFAULT_STT_COMMAND = "whisper";
 export const DEFAULT_STT_ARGS = ["-f", "{input}"];
 export const DEFAULT_STT_TIMEOUT_MS = 15000;
+export const DEFAULT_STT_MODE = "command";
+export const DEFAULT_STT_STREAM_URL = "http://127.0.0.1:18080/inference";
+export const DEFAULT_STT_STREAM_INTERVAL_MS = 800;
+export const DEFAULT_STT_STREAM_WINDOW_MS = 4000;
