@@ -115,6 +115,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     let lastRxEndAt = 0;
     let recordingFrames: Buffer[] = [];
     let streamTimer: NodeJS.Timeout | null = null;
+    let streamInFlight = false;
     let latestStreamText = "";
     const frameBytes = Math.floor(
       (config.audio.sampleRate * 1 * 2 * config.rx.frameMs) / 1000,
@@ -152,6 +153,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         ctx.log?.info?.("[digirig] STT stream start");
         if (streamTimer) clearInterval(streamTimer);
         streamTimer = setInterval(async () => {
+          if (streamInFlight) return;
+          streamInFlight = true;
           try {
             const frames = recordingFrames.slice(-streamWindowFrames);
             if (!frames.length) return;
@@ -161,6 +164,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             if (text) latestStreamText = text;
           } catch (err) {
             ctx.log?.debug?.(`[digirig] STT stream error: ${String(err)}`);
+          } finally {
+            streamInFlight = false;
           }
         }, config.stt.streamIntervalMs);
       }
@@ -198,6 +203,20 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
               .catch((err) =>
                 ctx.log?.debug?.(`[digirig] STT stream refresh failed: ${String(err)}`),
               );
+          }
+
+          if (!text.trim()) {
+            const filePath = join(tmpdir(), `digirig-${Date.now()}.wav`);
+            await fs.writeFile(filePath, wav);
+            try {
+              text = await runStt({
+                config: { ...config.stt, timeoutMs: Math.min(config.stt.timeoutMs, 15000) },
+                inputPath: filePath,
+                sampleRate: utterance.sampleRate,
+              });
+            } finally {
+              await fs.unlink(filePath).catch(() => undefined);
+            }
           }
         } else {
           const filePath = join(tmpdir(), `digirig-${Date.now()}.wav`);
