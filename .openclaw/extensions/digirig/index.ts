@@ -1,8 +1,10 @@
 import type { ChannelPlugin } from "openclaw/plugin-sdk";
 import { DEFAULT_ACCOUNT_ID, buildChannelConfigSchema } from "openclaw/plugin-sdk";
+import { Type } from "@sinclair/typebox";
 import { DigirigConfigSchema, type DigirigConfig } from "./src/config.js";
+import { DEFAULT_TX_CALLSIGN } from "./src/defaults.js";
 import { appendCallsign, createDigirigRuntime, type DigirigRuntime } from "./src/runtime.js";
-import { setDigirigRuntime } from "./src/state.js";
+import { getDigirigRuntime, setDigirigRuntime } from "./src/state.js";
 
 const meta = {
   id: "digirig",
@@ -58,7 +60,9 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
     deliveryMode: "direct",
     sendText: async ({ text }) => {
       const runtime = getRuntime();
-      await runtime.speak(appendCallsign(text));
+      const cfg = getDigirigRuntime().config.loadConfig();
+      const callsign = cfg.channels?.digirig?.tx?.callsign ?? DEFAULT_TX_CALLSIGN;
+      await runtime.speak(appendCallsign(text, callsign));
       return { channel: "digirig", messageId: `digirig-${Date.now()}` };
     },
   },
@@ -99,6 +103,27 @@ export default function register(api: { runtime: unknown }) {
   setDigirigRuntime(api.runtime);
   // @ts-expect-error plugin api shape is provided by OpenClaw at runtime
   api.registerChannel({ plugin: digirigPlugin });
+
+  const registerTool = (api as any).registerTool;
+  if (typeof registerTool === "function") {
+    registerTool(
+      {
+        name: "digirig_txTest",
+        description: "Transmit a short test phrase over DigiRig",
+        parameters: Type.Object({
+          text: Type.String({ minLength: 1 }),
+        }),
+        execute: async (_id: string, params: { text: string }) => {
+          const runtime = getRuntime();
+          const cfg = getDigirigRuntime().config.loadConfig();
+          const callsign = cfg.channels?.digirig?.tx?.callsign ?? DEFAULT_TX_CALLSIGN;
+          await runtime.speak(appendCallsign(params.text, callsign));
+          return { content: [{ type: "text", text: "tx sent" }] };
+        },
+      },
+      { optional: true },
+    );
+  }
 }
 
 export { digirigPlugin };

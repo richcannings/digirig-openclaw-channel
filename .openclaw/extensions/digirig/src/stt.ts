@@ -1,28 +1,12 @@
 import { spawn } from "node:child_process";
-import { pcmToWav } from "./wav.js";
-
-export type SttMode = "command" | "stream";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 export type SttConfig = {
-  mode: SttMode;
   command: string;
   args: string;
   timeoutMs: number;
-  streamUrl?: string;
-  streamAuth?: string;
-  streamIntervalMs?: number;
-  streamWindowMs?: number;
-};
-
-export type StreamingSttSession = {
-  push: (frame: Buffer) => void;
-  finalize: () => Promise<string>;
-  cancel: () => void;
-};
-
-export type StreamingSttClient = {
-  startSession: (params: { sampleRate: number; channels: number }) => Promise<StreamingSttSession>;
-  close: () => void;
 };
 
 function parseArgs(raw: string): string[] {
@@ -67,113 +51,16 @@ export function expandSttArgs(args: string, inputPath: string, sampleRate: numbe
   );
 }
 
-export function createStreamingSttClient(config: SttConfig): StreamingSttClient {
-  if (!config.streamUrl) {
-    throw new Error("stt.streamUrl is required for streaming mode");
-  }
-
-  const headers: Record<string, string> = {};
-  if (config.streamAuth) {
-    headers.Authorization = `Bearer ${config.streamAuth}`;
-  }
-
-  const streamIntervalMs = Math.max(0, config.streamIntervalMs ?? 0);
-  const streamWindowMs = Math.max(0, config.streamWindowMs ?? 0);
-
-  const submitInference = async (pcm: Buffer, sampleRate: number, channels: number) => {
-    const wav = pcmToWav(pcm, sampleRate, channels);
-    const form = new FormData();
-    form.append("file", new Blob([wav], { type: "audio/wav" }), "audio.wav");
-    form.append("response_format", "json");
-    form.append("temperature", "0");
-
-    const response = await fetch(config.streamUrl!, {
-      method: "POST",
-      headers,
-      body: form,
-    });
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(`stt stream http ${response.status}: ${text}`);
-    }
-
-    const json = (await response.json()) as { text?: string };
-    return String(json?.text ?? "");
-  };
-
-  return {
-    startSession: async ({ sampleRate, channels }) => {
-      let buffers: Buffer[] = [];
-      let totalBytes = 0;
-      let lastPartialAt = 0;
-      let partialInFlight = false;
-      let cancelled = false;
-
-      const maybeRunPartial = () => {
-        if (streamIntervalMs <= 0 || partialInFlight || cancelled) {
-          return;
-        }
-        const now = Date.now();
-        if (now - lastPartialAt < streamIntervalMs) {
-          return;
-        }
-        lastPartialAt = now;
-        partialInFlight = true;
-
-        const pcm = Buffer.concat(buffers, totalBytes);
-        let windowed = pcm;
-        if (streamWindowMs > 0) {
-          const bytesPerMs = Math.floor((sampleRate * channels * 2) / 1000);
-          const windowBytes = streamWindowMs * bytesPerMs;
-          if (windowBytes > 0 && pcm.length > windowBytes) {
-            windowed = pcm.subarray(pcm.length - windowBytes);
-          }
-        }
-
-        submitInference(windowed, sampleRate, channels)
-          .catch(() => undefined)
-          .finally(() => {
-            partialInFlight = false;
-          });
-      };
-
-      return {
-        push: (frame) => {
-          if (cancelled) {
-            return;
-          }
-          buffers.push(frame);
-          totalBytes += frame.length;
-          maybeRunPartial();
-        },
-        finalize: async () => {
-          if (cancelled) {
-            return "";
-          }
-          const pcm = Buffer.concat(buffers, totalBytes);
-          return submitInference(pcm, sampleRate, channels);
-        },
-        cancel: () => {
-          cancelled = true;
-          buffers = [];
-          totalBytes = 0;
-        },
-      };
-    },
-    close: () => {
-      // no persistent connection to close
-    },
-  };
-}
-
 export async function runStt(params: {
   config: SttConfig;
   inputPath: string;
   sampleRate: number;
 }): Promise<string> {
   const { config, inputPath, sampleRate } = params;
-  const args = expandSttArgs(config.args, inputPath, sampleRate);
+  const outputPath = join(tmpdir(), `digirig-stt-${Date.now()}.txt`);
+  const args = expandSttArgs(config.args, inputPath, sampleRate).map((arg) =>
+    arg.replaceAll("{output}", outputPath),
+  );
 
   const proc = spawn(config.command, args, {
     stdio: ["ignore", "pipe", "pipe"],
@@ -196,8 +83,12 @@ export async function runStt(params: {
   clearTimeout(timeout);
 
   if (exitCode !== 0) {
+    await fs.unlink(outputPath).catch(() => undefined);
     throw new Error(stderr.trim() || `STT command failed (${exitCode})`);
   }
 
-  return stdout.trim();
+  const fileText = await fs.readFile(outputPath, "utf8").catch(() => "");
+  await fs.unlink(outputPath).catch(() => undefined);
+
+  return (fileText || stdout).trim();
 }

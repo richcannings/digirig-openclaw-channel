@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import {
-  DEFAULT_AUDIO_CHANNELS,
   DEFAULT_AUDIO_DEVICE,
   DEFAULT_AUDIO_SAMPLE_RATE,
   DEFAULT_PTT_DEVICE,
@@ -14,13 +13,10 @@ import {
   DEFAULT_RX_MAX_SILENCE_MS,
   DEFAULT_RX_MIN_SPEECH_MS,
   DEFAULT_RX_PRE_ROLL_MS,
+  DEFAULT_RX_ENERGY_LOG_INTERVAL_MS,
+  DEFAULT_TX_CALLSIGN,
   DEFAULT_STT_ARGS,
   DEFAULT_STT_COMMAND,
-  DEFAULT_STT_MODE,
-  DEFAULT_STT_STREAM_AUTH,
-  DEFAULT_STT_STREAM_INTERVAL_MS,
-  DEFAULT_STT_STREAM_URL,
-  DEFAULT_STT_STREAM_WINDOW_MS,
   DEFAULT_STT_TIMEOUT_MS,
 } from "./defaults.js";
 
@@ -44,6 +40,11 @@ const DigirigPttSchema = z
 const DigirigRxSchema = z
   .object({
     energyThreshold: z.number().min(0).default(DEFAULT_RX_ENERGY_THRESHOLD),
+    energyLogIntervalMs: z
+      .number()
+      .int()
+      .min(0)
+      .default(DEFAULT_RX_ENERGY_LOG_INTERVAL_MS),
     frameMs: z.number().int().min(5).default(DEFAULT_RX_FRAME_MS),
     preRollMs: z.number().int().min(0).default(DEFAULT_RX_PRE_ROLL_MS),
     minSpeechMs: z.number().int().min(50).default(DEFAULT_RX_MIN_SPEECH_MS),
@@ -54,22 +55,24 @@ const DigirigRxSchema = z
   .default({});
 
 const DigirigSttSchema = z.object({
-  mode: z.enum(["command", "stream"]).default(DEFAULT_STT_MODE),
   command: z.string().min(1, "stt.command is required").default(DEFAULT_STT_COMMAND),
   args: z.string().default(DEFAULT_STT_ARGS.join(" ")),
   timeoutMs: z.number().int().min(1000).default(DEFAULT_STT_TIMEOUT_MS),
-  streamUrl: z.string().default(DEFAULT_STT_STREAM_URL),
-  streamAuth: z.string().default(DEFAULT_STT_STREAM_AUTH),
-  streamIntervalMs: z.number().int().min(0).default(DEFAULT_STT_STREAM_INTERVAL_MS),
-  streamWindowMs: z.number().int().min(0).default(DEFAULT_STT_STREAM_WINDOW_MS),
 });
+
+const DigirigTxSchema = z
+  .object({
+    callsign: z.string().min(1).default(DEFAULT_TX_CALLSIGN),
+  })
+  .default({});
 
 export const DigirigConfigSchema = z.object({
   enabled: z.boolean().optional().default(true),
-  audio: DigirigAudioSchema,
-  ptt: DigirigPttSchema,
-  rx: DigirigRxSchema,
-  stt: DigirigSttSchema,
+  audio: z.preprocess((val) => val ?? {}, DigirigAudioSchema),
+  ptt: z.preprocess((val) => val ?? {}, DigirigPttSchema),
+  rx: z.preprocess((val) => val ?? {}, DigirigRxSchema),
+  stt: z.preprocess((val) => val ?? {}, DigirigSttSchema),
+  tx: z.preprocess((val) => val ?? {}, DigirigTxSchema),
 });
 
 export type DigirigConfig = z.infer<typeof DigirigConfigSchema>;

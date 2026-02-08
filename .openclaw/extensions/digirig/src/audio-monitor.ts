@@ -8,6 +8,7 @@ export type AudioMonitorConfig = {
   frameMs: number;
   preRollMs: number;
   energyThreshold: number;
+  energyLogIntervalMs: number;
   minSpeechMs: number;
   maxSilenceMs: number;
   maxRecordMs: number;
@@ -38,6 +39,9 @@ export class AudioMonitor extends EventEmitter {
   private stallTimer: NodeJS.Timeout | null = null;
   private preRollFrames: Buffer[] = [];
   private preRollMaxFrames: number;
+  private energyLogTimer: NodeJS.Timeout | null = null;
+  private energyLogSamples = 0;
+  private energyLogSum = 0;
 
   constructor(config: AudioMonitorConfig) {
     super();
@@ -53,6 +57,7 @@ export class AudioMonitor extends EventEmitter {
 
     this.lastFrameAt = Date.now();
     this.startStallTimer();
+    this.startEnergyLogTimer();
 
     const args = [
       "-D",
@@ -90,6 +95,7 @@ export class AudioMonitor extends EventEmitter {
     this.stopped = true;
     this.clearRestartTimer();
     this.clearStallTimer();
+    this.clearEnergyLogTimer();
     if (this.proc) {
       this.proc.kill("SIGTERM");
       this.proc = null;
@@ -113,6 +119,10 @@ export class AudioMonitor extends EventEmitter {
       const frame = chunk.subarray(offset, offset + frameBytes);
       const energy = computeRms(frame);
       this.emit("energy", energy);
+      if (this.config.energyLogIntervalMs > 0) {
+        this.energyLogSamples += 1;
+        this.energyLogSum += energy;
+      }
 
       if (energy >= this.config.energyThreshold) {
         this.lastActiveAt = Date.now();
@@ -136,7 +146,6 @@ export class AudioMonitor extends EventEmitter {
 
       if (this.recording) {
         this.utteranceBuffers.push(frame);
-        this.emit("recording-data", { frame, energy, at: Date.now() });
         this.utteranceMs += this.config.frameMs;
         if (energy < this.config.energyThreshold) {
           this.silenceMs += this.config.frameMs;
@@ -219,6 +228,39 @@ export class AudioMonitor extends EventEmitter {
     }
   }
 
+  private startEnergyLogTimer(): void {
+    if (this.energyLogTimer) {
+      return;
+    }
+    if (!this.config.energyLogIntervalMs || this.config.energyLogIntervalMs <= 0) {
+      return;
+    }
+    this.energyLogTimer = setInterval(() => {
+      if (this.stopped) {
+        return;
+      }
+      if (this.energyLogSamples === 0) {
+        return;
+      }
+      const avg = this.energyLogSum / this.energyLogSamples;
+      this.emit(
+        "log",
+        `energy avg=${avg.toFixed(4)} over ${this.energyLogSamples} frames (thr=${this.config.energyThreshold})`,
+      );
+      this.energyLogSamples = 0;
+      this.energyLogSum = 0;
+    }, this.config.energyLogIntervalMs);
+  }
+
+  private clearEnergyLogTimer(): void {
+    if (this.energyLogTimer) {
+      clearInterval(this.energyLogTimer);
+      this.energyLogTimer = null;
+    }
+    this.energyLogSamples = 0;
+    this.energyLogSum = 0;
+  }
+
   private scheduleRestart(): void {
     if (this.stopped) {
       return;
@@ -248,6 +290,7 @@ export class AudioMonitor extends EventEmitter {
       this.proc = null;
     }
     this.clearStallTimer();
+    this.clearEnergyLogTimer();
     this.start();
   }
 }

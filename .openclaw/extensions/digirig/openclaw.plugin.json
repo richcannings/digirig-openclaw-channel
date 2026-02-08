@@ -28,8 +28,17 @@
     "ptt.tailMs": {
       "label": "PTT Tail (ms)"
     },
+    "tx.callsign": {
+      "label": "TX Callsign",
+      "help": "Appended to final responses if not already present."
+    },
     "rx.energyThreshold": {
       "label": "RX Energy Threshold"
+    },
+    "rx.energyLogIntervalMs": {
+      "label": "RX Energy Log Interval (ms)",
+      "help": "Log average RMS energy every N ms (0 disables).",
+      "advanced": true
     },
     "rx.preRollMs": {
       "label": "RX Pre-Roll (ms)"
@@ -49,10 +58,6 @@
     "stt": {
       "label": "Speech Recognition"
     },
-    "stt.mode": {
-      "label": "Speech Recognition Mode",
-      "help": "command = spawn a local CLI; stream = POST WAVs to a local whisper.cpp server."
-    },
     "stt.command": {
       "label": "Speech Recognition Command",
       "advanced": true
@@ -60,30 +65,10 @@
     "stt.args": {
       "label": "Speech Recognition Arguments",
       "advanced": true,
-      "help": "Space-separated args; wrap items with spaces in quotes."
+      "help": "Space-separated args; wrap items with spaces in quotes. Supports {input}, {sr}, {output}."
     },
     "stt.timeoutMs": {
       "label": "Speech Recognition Timeout (ms)",
-      "advanced": true
-    },
-    "stt.streamUrl": {
-      "label": "Speech Recognition Stream URL",
-      "help": "Full inference endpoint for whisper.cpp server (e.g. http://127.0.0.1:18080/inference).",
-      "advanced": true
-    },
-    "stt.streamAuth": {
-      "label": "Speech Recognition Stream Auth",
-      "help": "Bearer token for the streaming STT service.",
-      "advanced": true
-    },
-    "stt.streamIntervalMs": {
-      "label": "Stream Partial Interval (ms)",
-      "help": "How often to send rolling window audio for partial inference while recording.",
-      "advanced": true
-    },
-    "stt.streamWindowMs": {
-      "label": "Stream Window (ms)",
-      "help": "Rolling window size for partial inference requests.",
       "advanced": true
     }
   },
@@ -116,6 +101,7 @@
         "additionalProperties": false,
         "properties": {
           "energyThreshold": { "type": "number", "minimum": 0 },
+          "energyLogIntervalMs": { "type": "integer", "minimum": 0 },
           "frameMs": { "type": "integer", "minimum": 5 },
           "preRollMs": { "type": "integer", "minimum": 0 },
           "minSpeechMs": { "type": "integer", "minimum": 50 },
@@ -124,18 +110,20 @@
           "busyHoldMs": { "type": "integer", "minimum": 50 }
         }
       },
+      "tx": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "callsign": { "type": "string" }
+        }
+      },
       "stt": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "mode": { "type": "string", "enum": ["command", "stream"] },
           "command": { "type": "string" },
           "args": { "type": "string" },
-          "timeoutMs": { "type": "integer", "minimum": 1000 },
-          "streamUrl": { "type": "string" },
-          "streamAuth": { "type": "string" },
-          "streamIntervalMs": { "type": "integer", "minimum": 0 },
-          "streamWindowMs": { "type": "integer", "minimum": 0 }
+          "timeoutMs": { "type": "integer", "minimum": 1000 }
         }
       }
     }
