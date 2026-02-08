@@ -177,11 +177,27 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         );
         let text = "";
         if (config.stt.mode === "stream") {
-          try {
-            text = await runSttStream({ config: config.stt, wavBuffer: wav });
-          } catch (err) {
-            ctx.log?.error?.(`[digirig] STT stream failed: ${String(err)}`);
-            text = latestStreamText;
+          text = latestStreamText;
+          if (!text.trim()) {
+            try {
+              text = await runSttStream({
+                config: { ...config.stt, timeoutMs: Math.min(config.stt.timeoutMs, 5000) },
+                wavBuffer: wav,
+              });
+            } catch (err) {
+              ctx.log?.error?.(`[digirig] STT stream failed: ${String(err)}`);
+            }
+          } else {
+            runSttStream({
+              config: { ...config.stt, timeoutMs: Math.min(config.stt.timeoutMs, 5000) },
+              wavBuffer: wav,
+            })
+              .then((fresh) => {
+                if (fresh) latestStreamText = fresh;
+              })
+              .catch((err) =>
+                ctx.log?.debug?.(`[digirig] STT stream refresh failed: ${String(err)}`),
+              );
           }
         } else {
           const filePath = join(tmpdir(), `digirig-${Date.now()}.wav`);
