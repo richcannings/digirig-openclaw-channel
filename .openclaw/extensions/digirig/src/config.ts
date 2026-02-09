@@ -15,10 +15,7 @@ import {
   DEFAULT_RX_PRE_ROLL_MS,
   DEFAULT_RX_ENERGY_LOG_INTERVAL_MS,
   DEFAULT_TX_CALLSIGN,
-  DEFAULT_STT_ARGS,
-  DEFAULT_STT_COMMAND,
   DEFAULT_STT_TIMEOUT_MS,
-  DEFAULT_STT_MODE,
   DEFAULT_STT_STREAM_URL,
   DEFAULT_STT_STREAM_INTERVAL_MS,
   DEFAULT_STT_STREAM_WINDOW_MS,
@@ -59,10 +56,7 @@ const DigirigRxSchema = z
   .default({});
 
 const DigirigSttSchema = z.object({
-  command: z.string().min(1, "stt.command is required").default(DEFAULT_STT_COMMAND),
-  args: z.string().default(DEFAULT_STT_ARGS.join(" ")),
   timeoutMs: z.number().int().min(1000).default(DEFAULT_STT_TIMEOUT_MS),
-  mode: z.enum(["command", "stream"]).default(DEFAULT_STT_MODE),
   streamUrl: z.string().url().default(DEFAULT_STT_STREAM_URL),
   streamIntervalMs: z
     .number()

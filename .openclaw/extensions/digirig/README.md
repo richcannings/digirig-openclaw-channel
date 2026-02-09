@@ -35,17 +35,54 @@ openclaw config set channels.digirig.ptt.device "/dev/ttyUSB0"
 openclaw config set channels.digirig.ptt.rts true
 ```
 
-### STT (command)
-Defaults are `command="whisper"` and `args="-f {input}"`. Override if needed:
+### STT (streaming via whisper-server)
+Streaming STT reduces latency by sending rolling audio windows to a local `whisper-server` (required).
+
+1) Build whisper.cpp
 ```bash
-openclaw config set channels.digirig.stt.command "whisper"
-openclaw config set channels.digirig.stt.args -- "-m /path/to/model.bin -l en -f {input} -otxt -of {output}"
+# Clone once (example path)
+git clone https://github.com/ggerganov/whisper.cpp ~/src/whisper.cpp
+
+# Ensure helper scripts are executable
+chmod +x /path/to/digirig/scripts/whisper-*.sh
+
+# CPU build
+cd ~/src/whisper.cpp
+bash /path/to/digirig/scripts/whisper-build.sh cpu ~/src/whisper.cpp
 ```
 
-**STT args placeholders**
-- `{input}` → path to WAV file
-- `{sr}` → sample rate (Hz)
-- `{output}` → output text file path
+**CUDA build (GPU acceleration)**
+```bash
+# Install CUDA toolkit (Debian/Ubuntu)
+sudo apt-get update
+sudo apt-get install -y nvidia-cuda-toolkit
+
+# Build with CUDA
+bash /path/to/digirig/scripts/whisper-build.sh cuda ~/src/whisper.cpp
+```
+
+2) Download a model
+```bash
+cd ~/src/whisper.cpp
+bash ./models/download-ggml-model.sh medium.en
+```
+
+3) Run the server
+```bash
+bash /path/to/digirig/scripts/whisper-server.sh ~/src/whisper.cpp ~/src/whisper.cpp/models/ggml-medium.en.bin 127.0.0.1 18080
+```
+
+4) Configure OpenClaw for streaming
+```bash
+openclaw config set channels.digirig.stt.streamUrl "http://127.0.0.1:18080/inference"
+# Optional tuning:
+openclaw config set channels.digirig.stt.streamIntervalMs 1000
+openclaw config set channels.digirig.stt.streamWindowMs 4000
+```
+
+**Notes**
+- GPU build requires NVIDIA drivers + CUDA toolkit installed.
+- If the server is not running, DigiRig falls back to command STT when streaming is empty.
 
 ### TX callsign
 ```bash

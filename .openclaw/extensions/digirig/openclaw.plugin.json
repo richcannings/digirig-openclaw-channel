@@ -58,14 +58,17 @@
     "stt": {
       "label": "Speech Recognition"
     },
-    "stt.command": {
-      "label": "Speech Recognition Command",
+    "stt.streamUrl": {
+      "label": "Speech Recognition Stream URL",
+      "help": "whisper-server /inference endpoint (e.g. http://127.0.0.1:18080/inference)."
+    },
+    "stt.streamIntervalMs": {
+      "label": "Speech Recognition Stream Interval (ms)",
       "advanced": true
     },
-    "stt.args": {
-      "label": "Speech Recognition Arguments",
-      "advanced": true,
-      "help": "Space-separated args; wrap items with spaces in quotes. Supports {input}, {sr}, {output}."
+    "stt.streamWindowMs": {
+      "label": "Speech Recognition Stream Window (ms)",
+      "advanced": true
     },
     "stt.timeoutMs": {
       "label": "Speech Recognition Timeout (ms)",
@@ -121,8 +124,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "command": { "type": "string" },
-          "args": { "type": "string" },
+          "streamUrl": { "type": "string" },
+          "streamIntervalMs": { "type": "integer", "minimum": 100 },
+          "streamWindowMs": { "type": "integer", "minimum": 500 },
           "timeoutMs": { "type": "integer", "minimum": 1000 }
         }
       }
