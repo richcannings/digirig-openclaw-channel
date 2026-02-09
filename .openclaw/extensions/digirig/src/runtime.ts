@@ -41,6 +41,15 @@ function formatRadioReply(text: string, maxChars = 140): string {
   return base.slice(0, maxChars).trim();
 }
 
+function normalizeSttText(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  const lower = trimmed.toLowerCase();
+  if (lower === "[blank_audio]" || lower === "(blank audio)") return "";
+  if (/^\s*[\[(].*[\])]\s*$/.test(trimmed)) return "";
+  return trimmed;
+}
+
 export async function createDigirigRuntime(config: DigirigConfig): Promise<DigirigRuntime> {
   const runtime = getDigirigRuntime();
   const audioMonitor = new AudioMonitor({
@@ -162,7 +171,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           if (!frames.length) return;
           const pcm = Buffer.concat(frames);
           const wav = pcmToWav(pcm, config.audio.sampleRate, 1);
-          const text = await runSttStream({ config: config.stt, wavBuffer: wav });
+          const text = normalizeSttText(
+            await runSttStream({ config: config.stt, wavBuffer: wav }),
+          );
           if (text) latestStreamText = text;
         } catch (err) {
           ctx.log?.debug?.(`[digirig] STT stream error: ${String(err)}`);
@@ -184,10 +195,12 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         let text = latestStreamText;
         if (!text.trim()) {
           try {
-            text = await runSttStream({
-              config: { ...config.stt, timeoutMs: Math.min(config.stt.timeoutMs, 5000) },
-              wavBuffer: wav,
-            });
+            text = normalizeSttText(
+              await runSttStream({
+                config: { ...config.stt, timeoutMs: Math.min(config.stt.timeoutMs, 5000) },
+                wavBuffer: wav,
+              }),
+            );
           } catch (err) {
             ctx.log?.error?.(`[digirig] STT stream failed: ${String(err)}`);
           }
@@ -197,7 +210,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             wavBuffer: wav,
           })
             .then((fresh) => {
-              if (fresh) latestStreamText = fresh;
+              const normalized = normalizeSttText(fresh);
+              if (normalized) latestStreamText = normalized;
             })
             .catch((err) =>
               ctx.log?.debug?.(`[digirig] STT stream refresh failed: ${String(err)}`),
