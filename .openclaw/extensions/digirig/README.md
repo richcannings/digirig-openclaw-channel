@@ -67,12 +67,14 @@ cd ~/src/whisper.cpp
 bash ./models/download-ggml-model.sh medium.en
 ```
 
-3) Run the server
+3) Configure OpenClaw to auto-start whisper-server
 ```bash
-bash /path/to/digirig/scripts/whisper-server.sh ~/src/whisper.cpp ~/src/whisper.cpp/models/ggml-medium.en.bin 127.0.0.1 18080
+openclaw config set channels.digirig.stt.server.modelPath "/path/to/whisper.cpp/models/ggml-medium.en.bin"
+openclaw config set channels.digirig.stt.server.command "whisper-server"
+openclaw config set channels.digirig.stt.server.args -- "-m {model} --host {host} --port {port}"
 ```
 
-4) Configure OpenClaw for streaming
+4) Configure OpenClaw streaming endpoint + tuning
 ```bash
 openclaw config set channels.digirig.stt.streamUrl "http://127.0.0.1:18080/inference"
 # Optional tuning:
@@ -82,7 +84,11 @@ openclaw config set channels.digirig.stt.streamWindowMs 4000
 
 **Notes**
 - GPU build requires NVIDIA drivers + CUDA toolkit installed.
-- If the server is not running, DigiRig falls back to command STT when streaming is empty.
+- whisper-server auto-starts when DigiRig starts (if modelPath is set).
+- You can still run the server manually:
+```bash
+bash /path/to/digirig/scripts/whisper-server.sh ~/src/whisper.cpp ~/src/whisper.cpp/models/ggml-medium.en.bin 127.0.0.1 18080
+```
 
 ### TX callsign
 ```bash

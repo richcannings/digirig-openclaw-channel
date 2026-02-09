@@ -73,6 +73,39 @@
     "stt.timeoutMs": {
       "label": "Speech Recognition Timeout (ms)",
       "advanced": true
+    },
+    "stt.server": {
+      "label": "Whisper Server",
+      "advanced": true
+    },
+    "stt.server.autoStart": {
+      "label": "Whisper Server Auto-Start",
+      "advanced": true
+    },
+    "stt.server.command": {
+      "label": "Whisper Server Command",
+      "advanced": true
+    },
+    "stt.server.args": {
+      "label": "Whisper Server Arguments",
+      "advanced": true,
+      "help": "Supports {model}, {host}, {port}."
+    },
+    "stt.server.modelPath": {
+      "label": "Whisper Model Path",
+      "advanced": true
+    },
+    "stt.server.host": {
+      "label": "Whisper Server Host",
+      "advanced": true
+    },
+    "stt.server.port": {
+      "label": "Whisper Server Port",
+      "advanced": true
+    },
+    "stt.server.restartMs": {
+      "label": "Whisper Server Restart Delay (ms)",
+      "advanced": true
     }
   },
   "configSchema": {
@@ -127,7 +160,20 @@
           "streamUrl": { "type": "string" },
           "streamIntervalMs": { "type": "integer", "minimum": 100 },
           "streamWindowMs": { "type": "integer", "minimum": 500 },
-          "timeoutMs": { "type": "integer", "minimum": 1000 }
+          "timeoutMs": { "type": "integer", "minimum": 1000 },
+          "server": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "autoStart": { "type": "boolean" },
+              "command": { "type": "string" },
+              "args": { "type": "string" },
+              "modelPath": { "type": "string" },
+              "host": { "type": "string" },
+              "port": { "type": "integer", "minimum": 1 },
+              "restartMs": { "type": "integer", "minimum": 0 }
+            }
+          }
         }
       }
     }

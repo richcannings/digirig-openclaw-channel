@@ -14,5 +14,6 @@ describe("DigirigConfigSchema", () => {
     expect(result.ptt.device).toBe("/dev/ttyUSB0");
     expect(result.rx.frameMs).toBe(20);
     expect(result.stt.streamIntervalMs).toBe(800);
+    expect(result.stt.server.autoStart).toBe(true);
   });
 });

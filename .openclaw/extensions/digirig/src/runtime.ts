@@ -9,6 +9,7 @@ import { PttController } from "./ptt.js";
 import { runSttStream } from "./stt.js";
 import { pcmToWav } from "./wav.js";
 import { playPcm, synthesizeTts } from "./tts.js";
+import { WhisperServerManager } from "./whisper-server.js";
 
 export function appendCallsign(text: string, callsign?: string): string {
   const trimmed = text.trim();
@@ -62,6 +63,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     leadMs: config.ptt.leadMs,
     tailMs: config.ptt.tailMs,
   });
+
+  let whisperServer: WhisperServerManager | null = null;
 
   let stopped = false;
   let outboundQueue: Promise<void> = Promise.resolve();
@@ -329,12 +332,25 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       }
     });
 
+    whisperServer = new WhisperServerManager(
+      {
+        ...config.stt.server,
+        streamUrl: config.stt.streamUrl,
+      },
+      (msg) => ctx.log?.info?.(msg),
+    );
+    try {
+      await whisperServer.ensureRunning();
+    } catch (err) {
+      ctx.log?.error?.(`[digirig] whisper-server ensure failed: ${String(err)}`);
+    }
     audioMonitor.start();
 
     return {
       stop: () => {
         stopped = true;
         audioMonitor.stop();
+        void whisperServer?.stop();
       },
     };
   };
@@ -342,6 +358,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   const stop = async () => {
     stopped = true;
     audioMonitor.stop();
+    await whisperServer?.stop();
     await ptt.close();
   };
 

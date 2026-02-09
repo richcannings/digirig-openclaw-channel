@@ -48,11 +48,11 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
         },
       };
     },
-    isConfigured: (account) => Boolean(account.stt?.command?.trim()),
+    isConfigured: (account) => Boolean(account.stt?.streamUrl?.trim()),
     describeAccount: (account) => ({
       accountId: DEFAULT_ACCOUNT_ID,
       enabled: account.enabled ?? true,
-      configured: Boolean(account.stt?.command?.trim()),
+      configured: Boolean(account.stt?.streamUrl?.trim()),
     }),
   },
   outbound: {
