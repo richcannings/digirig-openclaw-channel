@@ -1,8 +1,10 @@
 # DigiRig Channel (OpenClaw)
 
-Talk to OpenClaw over ham radio. This project is a ham radio to OpenClaw bridge implemented as a first‑class OpenClaw channel (just like any other chat channel). It’s a playful nod to OpenClaw’s original “something you just talk to” intent, with local Whisper-based speech recognition (CUDA GPU recommended for faster STT). The initial git commit is 100% designed, implemented, and tested by OpenClaw using gpt-53-codex, and the plugin currently runs on Linux only.
+Talk to OpenClaw over ham radio. 
 
-We assume you already have a properly installed DigiRig and know how to use it.
+This project bridges ham radio voice operation to OpenClaw. It is implemented as a first‑class OpenClaw "Channel", with local Whisper-based speech recognition (CUDA GPU recommended). The plugin currently runs on Linux only.
+
+We recommend using a DigiRig. This will work on all radios with vox enabled.
 
 ## Checkout + use
 ```bash
