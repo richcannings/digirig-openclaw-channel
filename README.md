@@ -1,28 +1,27 @@
-# DigiRig Channel (OpenClaw)
+# DigiRig Channel for OpenClaw.
 
-Local ham radio RX/TX via DigiRig audio + PTT.
+Talk to OpenClaw over ham radio. 
 
-## Install from ZIP (fresh OpenClaw)
-1) Download the plugin ZIP.
-2) Extract it somewhere on disk.
-3) Install deps and register the plugin:
+This plugin provides local ham radio RX/TX via DigiRig audio using VOX or PTT with a digirig.
+
+## Install from source
 ```bash
-unzip ~/digirig-openclaw-channel-1.0.zip -d ~/digirig-openclaw-channel-1.0
-cd ~/digirig-openclaw-channel-1.0
-npm install
-openclaw plugins install -l ~/digirig-openclaw-channel-1.0
-openclaw gateway restart
-```
+# pick a location
+mkdir -p ~/src
+cd ~/src
 
-## Install from source (local dev)
-```bash
-cd /home/richc/src/digirig-openclaw-channel
+git clone https://github.com/richcannings/digirig-openclaw-channel
+cd digirig-openclaw-channel
 npm install
-openclaw plugins install -l /home/richc/src/digirig-openclaw-channel
+
+openclaw plugins install -l ~/src/digirig-openclaw-channel
 openclaw gateway restart
 ```
 
 ## Configure
+
+Configuration is possible through the web ui, command line, and of course by talking with openclaw. Here are the commmand line settings.
+
 ### Audio devices
 ```bash
 arecord -l
@@ -32,6 +31,7 @@ openclaw config set channels.digirig.audio.outputDevice "plughw:0,0"
 ```
 
 ### PTT
+This can also be used for testing so that openclaw does not transmit.
 ```bash
 openclaw config set channels.digirig.ptt.device "/dev/ttyUSB0"
 openclaw config set channels.digirig.ptt.rts true
@@ -100,20 +100,4 @@ openclaw config set channels.digirig.tx.callsign "W6RGC/AI"
 ### TX disable (RX-only)
 ```bash
 openclaw config set channels.digirig.ptt.rts false
-```
-
-## Permissions
-If PTT serial access fails:
-```bash
-sudo usermod -aG dialout $USER
-```
-Log out/in afterward.
-
-## Quick test
-```bash
-# RX capture
-arecord -D plughw:0,0 -f S16_LE -r 16000 -c 1 -d 5 /tmp/rx.wav
-
-# STT
-whisper -f /tmp/rx.wav
 ```
