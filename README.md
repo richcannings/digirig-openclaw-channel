@@ -14,9 +14,11 @@ openclaw plugins install -l ~/digirig-openclaw-channel-1.0
 openclaw gateway restart
 ```
 
-## Install from source
+## Install from source (local dev)
 ```bash
-openclaw plugins install -l /path/to/openclaw/.openclaw/extensions/digirig
+cd /home/richc/src/digirig-openclaw-channel
+npm install
+openclaw plugins install -l /home/richc/src/digirig-openclaw-channel
 openclaw gateway restart
 ```
 
