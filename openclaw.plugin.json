@@ -1,6 +1,109 @@
 {
   "id": "digirig",
   "channels": ["digirig"],
+  "uiHints": {
+    "audio.inputDevice": {
+      "placeholder": "plughw:0,0"
+    },
+    "audio.outputDevice": {
+      "placeholder": "plughw:0,0"
+    },
+    "ptt": {
+      "label": "PTT"
+    },
+    "ptt.device": {
+      "label": "PTT USB Serial Port",
+      "placeholder": "/dev/ttyUSB0"
+    },
+    "ptt.rts": {
+      "label": "PTT RTS Enabled"
+    },
+    "ptt.leadMs": {
+      "label": "PTT Lead (ms)"
+    },
+    "ptt.tailMs": {
+      "label": "PTT Tail (ms)"
+    },
+    "tx.callsign": {
+      "label": "TX Callsign",
+      "help": "Appended to final responses if not already present."
+    },
+    "rx.energyThreshold": {
+      "label": "RX Energy Threshold"
+    },
+    "rx.energyLogIntervalMs": {
+      "label": "RX Energy Log Interval (ms)",
+      "help": "Log average RMS energy every N ms (0 disables).",
+      "advanced": true
+    },
+    "rx.preRollMs": {
+      "label": "RX Pre-Roll (ms)"
+    },
+    "rx.minSpeechMs": {
+      "label": "RX Min Speech (ms)"
+    },
+    "rx.maxSilenceMs": {
+      "label": "RX Max Silence (ms)"
+    },
+    "rx.maxRecordMs": {
+      "label": "RX Max Record (ms)"
+    },
+    "rx.busyHoldMs": {
+      "label": "RX Busy Hold (ms)"
+    },
+    "stt": {
+      "label": "Speech Recognition"
+    },
+    "stt.streamUrl": {
+      "label": "Speech Recognition Stream URL",
+      "help": "whisper-server /inference endpoint (e.g. http://127.0.0.1:18080/inference)."
+    },
+    "stt.streamIntervalMs": {
+      "label": "Speech Recognition Stream Interval (ms)",
+      "advanced": true
+    },
+    "stt.streamWindowMs": {
+      "label": "Speech Recognition Stream Window (ms)",
+      "advanced": true
+    },
+    "stt.timeoutMs": {
+      "label": "Speech Recognition Timeout (ms)",
+      "advanced": true
+    },
+    "stt.server": {
+      "label": "Whisper Server",
+      "advanced": true
+    },
+    "stt.server.autoStart": {
+      "label": "Whisper Server Auto-Start",
+      "advanced": true
+    },
+    "stt.server.command": {
+      "label": "Whisper Server Command",
+      "advanced": true
+    },
+    "stt.server.args": {
+      "label": "Whisper Server Arguments",
+      "advanced": true,
+      "help": "Supports {model}, {host}, {port}."
+    },
+    "stt.server.modelPath": {
+      "label": "Whisper Model Path",
+      "advanced": true
+    },
+    "stt.server.host": {
+      "label": "Whisper Server Host",
+      "advanced": true
+    },
+    "stt.server.port": {
+      "label": "Whisper Server Port",
+      "advanced": true
+    },
+    "stt.server.restartMs": {
+      "label": "Whisper Server Restart Delay (ms)",
+      "advanced": true
+    }
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

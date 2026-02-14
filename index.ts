@@ -55,6 +55,28 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
       configured: Boolean(account.stt?.streamUrl?.trim()),
     }),
   },
+  status: {
+    defaultRuntime: {
+      accountId: DEFAULT_ACCOUNT_ID,
+      running: false,
+      connected: false,
+      lastConnectedAt: null,
+      lastInboundAt: null,
+      lastEventAt: null,
+      lastError: null,
+    },
+    buildAccountSnapshot: ({ account, runtime }) => ({
+      accountId: DEFAULT_ACCOUNT_ID,
+      enabled: account.enabled ?? true,
+      configured: Boolean(account.stt?.streamUrl?.trim()),
+      running: runtime?.running ?? false,
+      connected: runtime?.connected ?? false,
+      lastConnectedAt: runtime?.lastConnectedAt ?? null,
+      lastInboundAt: runtime?.lastInboundAt ?? null,
+      lastEventAt: runtime?.lastEventAt ?? null,
+      lastError: runtime?.lastError ?? null,
+    }),
+  },
   outbound: {
     deliveryMode: "direct",
     sendText: async ({ text }) => {

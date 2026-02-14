@@ -1,23 +1,26 @@
 # DigiRig Channel (OpenClaw)
 
-Talk to OpenClaw over ham radio. 
+Local ham radio RX/TX via DigiRig audio + PTT.
 
-This project bridges ham radio voice operation to OpenClaw. It is implemented as a first‑class OpenClaw "Channel", with local Whisper-based speech recognition (CUDA GPU recommended). The plugin currently runs on Linux only.
-
-We recommend using a DigiRig. This will work on all radios with vox enabled.
-
-## Checkout + use
+## Install from ZIP (fresh OpenClaw)
+1) Download the plugin ZIP.
+2) Extract it somewhere on disk.
+3) Install deps and register the plugin:
 ```bash
-git clone https://github.com/richcannings/digirig-openclaw-channel
-cd digirig-openclaw-channel
+unzip ~/digirig-openclaw-channel-1.0.zip -d ~/digirig-openclaw-channel-1.0
+cd ~/digirig-openclaw-channel-1.0
 npm install
-openclaw plugins install -l .
+openclaw plugins install -l ~/digirig-openclaw-channel-1.0
+openclaw gateway restart
+```
+
+## Install from source
+```bash
+openclaw plugins install -l /path/to/openclaw/.openclaw/extensions/digirig
 openclaw gateway restart
 ```
 
 ## Configure
-You can set these in the OpenClaw web app or via CLI.
-
 ### Audio devices
 ```bash
 arecord -l
@@ -32,20 +35,59 @@ openclaw config set channels.digirig.ptt.device "/dev/ttyUSB0"
 openclaw config set channels.digirig.ptt.rts true
 ```
 
-### STT (automatic)
-Whisper is handled automatically and attempts to use CUDA when available. These settings usually don’t need changes, but the defaults are:
+### STT (streaming via whisper-server)
+Streaming STT reduces latency by sending rolling audio windows to a local `whisper-server` (required).
+
+1) Build whisper.cpp
 ```bash
-openclaw config set channels.digirig.stt.streamUrl "http://127.0.0.1:18080/inference"
-openclaw config set channels.digirig.stt.streamIntervalMs 1000
-openclaw config set channels.digirig.stt.streamWindowMs 4000
-openclaw config set channels.digirig.stt.timeoutMs 15000
-openclaw config set channels.digirig.stt.server.autoStart true
+# Clone once (example path)
+git clone https://github.com/ggerganov/whisper.cpp ~/src/whisper.cpp
+
+# Ensure helper scripts are executable
+chmod +x /path/to/digirig/scripts/whisper-*.sh
+
+# CPU build
+cd ~/src/whisper.cpp
+bash /path/to/digirig/scripts/whisper-build.sh cpu ~/src/whisper.cpp
+```
+
+**CUDA build (GPU acceleration)**
+```bash
+# Install CUDA toolkit (Debian/Ubuntu)
+sudo apt-get update
+sudo apt-get install -y nvidia-cuda-toolkit
+
+# Build with CUDA
+bash /path/to/digirig/scripts/whisper-build.sh cuda ~/src/whisper.cpp
+```
+
+2) Download a model
+```bash
+cd ~/src/whisper.cpp
+bash ./models/download-ggml-model.sh medium.en
+```
+
+3) Configure OpenClaw to auto-start whisper-server
+```bash
+openclaw config set channels.digirig.stt.server.modelPath "/path/to/whisper.cpp/models/ggml-medium.en.bin"
 openclaw config set channels.digirig.stt.server.command "whisper-server"
 openclaw config set channels.digirig.stt.server.args -- "-m {model} --host {host} --port {port}"
-openclaw config set channels.digirig.stt.server.modelPath ""
-openclaw config set channels.digirig.stt.server.host "127.0.0.1"
-openclaw config set channels.digirig.stt.server.port 18080
-openclaw config set channels.digirig.stt.server.restartMs 2000
+```
+
+4) Configure OpenClaw streaming endpoint + tuning
+```bash
+openclaw config set channels.digirig.stt.streamUrl "http://127.0.0.1:18080/inference"
+# Optional tuning:
+openclaw config set channels.digirig.stt.streamIntervalMs 1000
+openclaw config set channels.digirig.stt.streamWindowMs 4000
+```
+
+**Notes**
+- GPU build requires NVIDIA drivers + CUDA toolkit installed.
+- whisper-server auto-starts when DigiRig starts (if modelPath is set).
+- You can still run the server manually:
+```bash
+bash /path/to/digirig/scripts/whisper-server.sh ~/src/whisper.cpp ~/src/whisper.cpp/models/ggml-medium.en.bin 127.0.0.1 18080
 ```
 
 ### TX callsign
@@ -58,3 +100,18 @@ openclaw config set channels.digirig.tx.callsign "W6RGC/AI"
 openclaw config set channels.digirig.ptt.rts false
 ```
 
+## Permissions
+If PTT serial access fails:
+```bash
+sudo usermod -aG dialout $USER
+```
+Log out/in afterward.
+
+## Quick test
+```bash
+# RX capture
+arecord -D plughw:0,0 -f S16_LE -r 16000 -c 1 -d 5 /tmp/rx.wav
+
+# STT
+whisper -f /tmp/rx.wav
+```
