@@ -2,7 +2,7 @@
 
 Talk to OpenClaw over ham radio. 
 
-This plugin provides local ham radio RX/TX via DigiRig audio using VOX or PTT with a digirig.
+This plugin provides local ham radio RX/TX using VOX or PTT via a digirig.
 
 ## Install from source
 ```bash
