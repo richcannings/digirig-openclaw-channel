@@ -119,11 +119,33 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       return { stop: () => {} };
     }
 
+    const updateStatus = (patch: Partial<{
+      running: boolean;
+      connected: boolean;
+      lastConnectedAt: number | null;
+      lastDisconnect: { at: number; error?: string } | null;
+      lastStartAt: number | null;
+      lastStopAt: number | null;
+      lastInboundAt: number | null;
+      lastEventAt: number | null;
+      lastError: string | null;
+    }>) => {
+      ctx.setStatus({
+        ...ctx.getStatus(),
+        accountId: ctx.accountId,
+        ...patch,
+      });
+    };
+
     audioMonitor.on("log", (msg) => ctx.log?.debug?.(`[digirig] ${msg}`));
-    audioMonitor.on("error", (err) => ctx.log?.error?.(`[digirig] ${String(err)}`));
-    audioMonitor.on("recording-start", (evt) =>
-      ctx.log?.info?.(`[digirig] RX start (energy=${evt?.energy?.toFixed?.(4) ?? "?"})`),
-    );
+    audioMonitor.on("error", (err) => {
+      ctx.log?.error?.(`[digirig] ${String(err)}`);
+      updateStatus({ lastError: String(err) });
+    });
+    audioMonitor.on("recording-start", (evt) => {
+      ctx.log?.info?.(`[digirig] RX start (energy=${evt?.energy?.toFixed?.(4) ?? "?"})`);
+      updateStatus({ lastEventAt: Date.now() });
+    });
     let lastRxEndAt = 0;
     let recordingFrames: Buffer[] = [];
     let streamTimer: NodeJS.Timeout | null = null;
@@ -223,6 +245,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         if (!text.trim()) {
           return;
         }
+        updateStatus({ lastInboundAt: Date.now() });
 
         const cfg = runtime.config.loadConfig();
         const routeStartAt = Date.now();
@@ -356,15 +379,29 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     try {
       await whisperServer.ensureRunning();
     } catch (err) {
-      ctx.log?.error?.(`[digirig] whisper-server ensure failed: ${String(err)}`);
+      const errText = String(err);
+      ctx.log?.error?.(`[digirig] whisper-server ensure failed: ${errText}`);
+      updateStatus({ lastError: errText });
     }
     audioMonitor.start();
+    updateStatus({
+      running: true,
+      connected: true,
+      lastConnectedAt: Date.now(),
+      lastStartAt: Date.now(),
+      lastError: null,
+    });
 
     return {
       stop: () => {
         stopped = true;
         audioMonitor.stop();
         void whisperServer?.stop();
+        updateStatus({
+          running: false,
+          connected: false,
+          lastStopAt: Date.now(),
+        });
       },
     };
   };
