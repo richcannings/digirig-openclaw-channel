@@ -50,6 +50,18 @@ function normalizeSttText(text: string): string {
   return trimmed;
 }
 
+function isCallsignOnly(text: string): boolean {
+  const tokens = text
+    .toUpperCase()
+    .split(/\s+/)
+    .map((token) => token.replace(/[^A-Z0-9/]/g, ""))
+    .filter(Boolean);
+  if (!tokens.length) return false;
+  const hasDigit = tokens.some((token) => /\d/.test(token));
+  const allCallsignChars = tokens.every((token) => /^[A-Z0-9/]+$/.test(token));
+  return hasDigit && allCallsignChars;
+}
+
 export async function createDigirigRuntime(config: DigirigConfig): Promise<DigirigRuntime> {
   const runtime = getDigirigRuntime();
   const audioMonitor = new AudioMonitor({
@@ -205,11 +217,27 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       }, config.stt.streamIntervalMs);
     });
 
-    audioMonitor.on("utterance", async (utterance) => {
+    const utteranceJoinMs = Math.max(800, Math.min(1500, config.rx.maxSilenceMs + 200));
+    let utteranceTimer: NodeJS.Timeout | null = null;
+    let pendingUtterance: {
+      pcm: Buffer[];
+      sampleRate: number;
+      channels: number;
+      startedAt: number;
+    } | null = null;
+
+    const flushUtterance = async () => {
+      if (!pendingUtterance) return;
+      const current = pendingUtterance;
+      pendingUtterance = null;
+      if (utteranceTimer) {
+        clearTimeout(utteranceTimer);
+        utteranceTimer = null;
+      }
+      const utteranceStartAt = current.startedAt;
+      const rxEndAt = lastRxEndAt || Date.now();
+      const wav = pcmToWav(Buffer.concat(current.pcm), current.sampleRate, current.channels);
       try {
-        const rxEndAt = lastRxEndAt || Date.now();
-        const utteranceStartAt = Date.now();
-        const wav = pcmToWav(utterance.pcm, utterance.sampleRate, utterance.channels);
         const sttStartAt = Date.now();
         ctx.log?.info?.(
           `[digirig] STT start (rxToSttStartMs=${sttStartAt - rxEndAt})`,
@@ -243,6 +271,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
         await logTranscript("RX", text);
         if (!text.trim()) {
+          return;
+        }
+        if (isCallsignOnly(text)) {
+          ctx.log?.info?.("[digirig] RX callsign-only; skipping response");
           return;
         }
         updateStatus({ lastInboundAt: Date.now() });
@@ -367,6 +399,34 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       } catch (err) {
         ctx.log?.error?.(`[digirig] inbound error: ${String(err)}`);
       }
+    };
+
+    audioMonitor.on("utterance", (utterance) => {
+      if (!pendingUtterance) {
+        pendingUtterance = {
+          pcm: [],
+          sampleRate: utterance.sampleRate,
+          channels: utterance.channels,
+          startedAt: Date.now(),
+        };
+      }
+      if (
+        pendingUtterance.sampleRate !== utterance.sampleRate ||
+        pendingUtterance.channels !== utterance.channels
+      ) {
+        void flushUtterance();
+        pendingUtterance = {
+          pcm: [],
+          sampleRate: utterance.sampleRate,
+          channels: utterance.channels,
+          startedAt: Date.now(),
+        };
+      }
+      pendingUtterance.pcm.push(utterance.pcm);
+      if (utteranceTimer) clearTimeout(utteranceTimer);
+      utteranceTimer = setTimeout(() => {
+        void flushUtterance();
+      }, utteranceJoinMs);
     });
 
     whisperServer = new WhisperServerManager(
