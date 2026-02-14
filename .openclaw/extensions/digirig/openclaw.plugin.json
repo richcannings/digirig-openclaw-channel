@@ -3,14 +3,10 @@
   "channels": ["digirig"],
   "uiHints": {
     "audio.inputDevice": {
-      "label": "Audio Input Device",
-      "placeholder": "hw:2,0",
-      "help": "ALSA capture device for RX (arecord)."
+      "placeholder": "plughw:0,0"
     },
     "audio.outputDevice": {
-      "label": "Audio Output Device",
-      "placeholder": "hw:2,0",
-      "help": "ALSA playback device for TX (aplay)."
+      "placeholder": "plughw:0,0"
     },
     "ptt": {
       "label": "PTT"

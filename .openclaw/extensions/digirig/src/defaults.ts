@@ -1,4 +1,4 @@
-export const DEFAULT_AUDIO_DEVICE = "hw:2,0";
+export const DEFAULT_AUDIO_DEVICE = "plughw:0,0";
 export const DEFAULT_AUDIO_SAMPLE_RATE = 16000;
 
 export const DEFAULT_PTT_DEVICE = "/dev/ttyUSB0";
