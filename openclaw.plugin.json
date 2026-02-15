@@ -146,7 +146,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "callsign": { "type": "string" }
+          "callsign": { "type": "string" },
+          "policy": { "type": "string" },
+          "allowToolTx": { "type": "boolean" }
         }
       },
       "stt": {
