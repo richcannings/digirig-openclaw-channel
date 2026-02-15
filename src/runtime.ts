@@ -59,6 +59,7 @@ function normalizeSttText(text: string): string {
   if (!trimmed) return "";
   const lower = trimmed.toLowerCase();
   if (lower === "[blank_audio]" || lower === "(blank audio)") return "";
+  if (lower === "(beep)" || lower === "[beep]") return "";
   if (/^\s*[\[(].*[\])]\s*$/.test(trimmed)) return "";
 
   // Drop stray 1–3 character prefix fragments (e.g., "GC.") when followed by a sentence.
@@ -109,8 +110,20 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     await fs.appendFile(logPath, `${line}\n`);
   };
 
+  const logDupe = async (line: string) => {
+    await fs.mkdir(logDir, { recursive: true });
+    const dupePath = join(logDir, `digirig-dupe-${logDate}.log`);
+    await fs.appendFile(dupePath, `${line}\n`);
+  };
+
   let lastRxText = "";
   let lastRxAt = 0;
+  let rxBuffer: string[] = [];
+  let rxStartAt = 0;
+  let rxFinalizeTimer: NodeJS.Timeout | null = null;
+  let lastTxText = "";
+  let lastTxAt = 0;
+  let rxFinalized = false;
 
   const logTranscript = async (speaker: "RX" | "TX", text: string) => {
     if (!text.trim()) return;
@@ -138,7 +151,19 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     };
 
     outboundQueue = outboundQueue.then(async () => {
-      await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 2000);
+      const trimmed = text.trim();
+      // Dedupe TX responses within a short time window.
+      if (trimmed && trimmed === lastTxText && Date.now() - lastTxAt < 30000) {
+        logger?.info?.("[digirig] TX dropped (duplicate)");
+        const ts = new Date().toISOString();
+        await logDupe(
+          `[${ts}] kind=tx reason=duplicate windowMs=30000 originalAt=${new Date(lastTxAt).toISOString()} duplicateAt=${ts} original=${JSON.stringify(lastTxText)} duplicate=${JSON.stringify(trimmed)}`,
+        );
+        return;
+      }
+      lastTxText = trimmed;
+      lastTxAt = Date.now();
+      await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 60000);
       await ptt.withTx(async () => {
         const tts = await synthesizeTts(runtime, text);
         await safeSetCaptureMute(true);
@@ -153,7 +178,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           await safeSetCaptureMute(false);
         }
       });
-      await logTranscript("TX", text.trim());
+      await logTranscript("TX", trimmed);
     });
     await outboundQueue;
   };
@@ -204,6 +229,181 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       Math.ceil(config.stt.streamWindowMs / config.rx.frameMs),
     );
 
+    const scheduleFinalizeRx = () => {
+      if (rxFinalizeTimer) {
+        clearTimeout(rxFinalizeTimer);
+      }
+      rxFinalizeTimer = setTimeout(() => {
+        rxFinalizeTimer = null;
+        if (!rxFinalized) {
+          void finalizeRx();
+        }
+      }, 200);
+    };
+
+    const finalizeRx = async () => {
+      if (rxFinalized) return;
+      const text = normalizeSttText(rxBuffer.join(" "));
+      if (!text) {
+        rxBuffer = [];
+        rxStartAt = 0;
+        return;
+      }
+      if (text === lastRxText && Date.now() - lastRxAt < 15000) {
+        ctx.log?.info?.("[digirig] RX dropped (duplicate finalize)");
+        const ts = new Date().toISOString();
+        await logDupe(
+          `[${ts}] kind=rx reason=duplicate-finalize windowMs=15000 originalAt=${new Date(lastRxAt).toISOString()} duplicateAt=${ts} original=${JSON.stringify(lastRxText)} duplicate=${JSON.stringify(text)}`,
+        );
+        rxBuffer = [];
+        rxStartAt = 0;
+        rxFinalized = true;
+        return;
+      }
+      lastRxText = text;
+      lastRxAt = Date.now();
+      await logTranscript("RX", text);
+      updateStatus({ lastInboundAt: Date.now() });
+
+      const cfg = runtime.config.loadConfig();
+      const routeStartAt = Date.now();
+      const route = runtime.channel.routing.resolveAgentRoute({
+        cfg,
+        channel: "digirig",
+        accountId: "default",
+        peer: {
+          kind: "direct",
+          id: "radio",
+        },
+      });
+      const routeEndAt = Date.now();
+
+      const policy = config.tx.policy ?? "direct-only";
+      const direct = isDirectCall(text, config.tx.callsign);
+      if (policy === "direct-only" && !direct) {
+        ctx.log?.info?.("[digirig] TX blocked by policy (direct-only)");
+        rxBuffer = [];
+        rxStartAt = 0;
+        rxFinalized = true;
+        return;
+      }
+      if (policy === "value-and-wait") {
+        if (!direct) {
+          ctx.log?.info?.("[digirig] TX blocked by policy (value-and-wait)");
+          rxBuffer = [];
+          rxStartAt = 0;
+          rxFinalized = true;
+          return;
+        }
+        await delay(4000);
+      }
+
+      const envelopeOptions = runtime.channel.reply.resolveEnvelopeFormatOptions(cfg);
+      const body = runtime.channel.reply.formatAgentEnvelope({
+        channel: "DigiRig",
+        from: "radio",
+        timestamp: Date.now(),
+        envelope: envelopeOptions,
+        body: text,
+      });
+
+      const ctxPayload = runtime.channel.reply.finalizeInboundContext({
+        Body: body,
+        RawBody: text,
+        CommandBody: text,
+        BodyForAgent: text,
+        BodyForCommands: text,
+        CommandSource: "channel",
+        CommandTargetSessionKey: route.sessionKey,
+        From: "digirig:radio",
+        To: "digirig:radio",
+        SessionKey: route.sessionKey,
+        AccountId: route.accountId,
+        ChatType: "direct",
+        ConversationLabel: "radio",
+        SenderName: "radio",
+        SenderId: "radio",
+        Provider: "digirig",
+        Surface: "digirig",
+        MessageSid: `digirig-${Date.now()}`,
+        OriginatingChannel: "digirig",
+        OriginatingTo: "digirig:radio",
+        CommandAuthorized: true,
+      });
+
+      const storePath = runtime.channel.session.resolveStorePath(cfg.session?.store, {
+        agentId: route.agentId,
+      });
+      await runtime.channel.session.recordInboundSession({
+        storePath,
+        sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+        ctx: ctxPayload,
+        onRecordError: (err) =>
+          ctx.log?.error?.(`[digirig] session record error: ${String(err)}`),
+      });
+
+      const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
+        cfg,
+        agentId: route.agentId,
+        channel: "digirig",
+        accountId: route.accountId,
+      });
+
+      const dispatchStartAt = Date.now();
+      let firstTxAt = 0;
+      let speakMs = 0;
+      ctx.log?.info?.("[digirig] dispatch reply start");
+      const dispatchResult = await runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+        ctx: ctxPayload,
+        cfg,
+        dispatcherOptions: {
+          ...prefixOptions,
+          deliver: async (payload) => {
+            if (!payload.text) {
+              return;
+            }
+            const shortReply = formatRadioReply(payload.text);
+            if (!shortReply) {
+              return;
+            }
+            const txText = appendCallsign(shortReply, config.tx.callsign);
+            ctx.log?.info?.(`[digirig] reply deliver: ${txText}`);
+            if (!firstTxAt) {
+              firstTxAt = Date.now();
+            }
+            const speakStartAt = Date.now();
+            await speak(txText);
+            speakMs = Date.now() - speakStartAt;
+          },
+          onError: (err, info) =>
+            ctx.log?.error?.(`[digirig] ${info.kind} reply failed: ${String(err)}`),
+        },
+        replyOptions: {
+          onModelSelected,
+          onAgentRunStart: (runId) => ctx.log?.info?.(`[digirig] agent run start: ${runId}`),
+          disableBlockStreaming: true,
+        },
+      });
+      const dispatchEndAt = Date.now();
+      const counts = dispatchResult?.counts ?? {};
+      const timing = {
+        rxToSttStartMs: null,
+        sttMs: null,
+        routeMs: routeEndAt - routeStartAt,
+        dispatchMs: dispatchEndAt - dispatchStartAt,
+        rxToFirstTxMs: firstTxAt ? firstTxAt - lastRxEndAt : null,
+        speakMs: speakMs || null,
+        totalRxToDoneMs: dispatchEndAt - lastRxEndAt,
+        totalUtteranceToDoneMs: rxStartAt ? dispatchEndAt - rxStartAt : null,
+      };
+      ctx.log?.info?.(
+        `[digirig] dispatch reply complete (counts=${JSON.stringify(counts)} timing=${JSON.stringify(timing)})`,
+      );
+      rxBuffer = [];
+      rxStartAt = 0;
+      rxFinalized = true;
+    };
+
     audioMonitor.on("recording-end", (evt) => {
       lastRxEndAt = Date.now();
       const reason = evt?.reason ?? "?";
@@ -215,6 +415,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         clearInterval(streamTimer);
         streamTimer = null;
       }
+      scheduleFinalizeRx();
     });
 
     audioMonitor.on("recording-frame", (frame: Buffer) => {
@@ -228,6 +429,14 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     audioMonitor.on("recording-start", () => {
       recordingFrames = [];
       latestStreamText = "";
+      rxFinalized = false;
+      if (rxFinalizeTimer) {
+        clearTimeout(rxFinalizeTimer);
+        rxFinalizeTimer = null;
+      }
+      if (!rxBuffer.length) {
+        rxStartAt = Date.now();
+      }
       ctx.log?.info?.("[digirig] STT stream start");
       if (streamTimer) clearInterval(streamTimer);
       streamTimer = setInterval(async () => {
@@ -251,6 +460,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     });
 
     audioMonitor.on("utterance", async (utterance) => {
+      if (rxFinalized) {
+        return;
+      }
       try {
         const rxEndAt = lastRxEndAt || Date.now();
         const utteranceStartAt = Date.now();
@@ -284,159 +496,29 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
               ctx.log?.debug?.(`[digirig] STT stream refresh failed: ${String(err)}`),
             );
         }
-
-        // Join short suffix fragments like "C connector" when the previous RX ended in "USB".
-        if (text && Date.now() - lastRxAt < 12000) {
-          const last = lastRxText.trim();
-          const lowerLast = last.toLowerCase();
-          const lowerText = text.toLowerCase();
-          if (lowerLast.endsWith(" usb") && (lowerText.startsWith("c ") || lowerText.startsWith("c-"))) {
-            text = `${last} ${text}`;
-          }
-        }
         const sttEndAt = Date.now();
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
         if (!text.trim()) {
           return;
         }
-
         const normalizedRx = normalizeSttText(text);
         if (!normalizedRx) {
           return;
         }
-        lastRxText = normalizedRx;
-        lastRxAt = Date.now();
-        await logTranscript("RX", normalizedRx);
-        updateStatus({ lastInboundAt: Date.now() });
 
-        const cfg = runtime.config.loadConfig();
-        const routeStartAt = Date.now();
-        const route = runtime.channel.routing.resolveAgentRoute({
-          cfg,
-          channel: "digirig",
-          accountId: "default",
-          peer: {
-            kind: "direct",
-            id: "radio",
-          },
-        });
-        const routeEndAt = Date.now();
-
-        const policy = config.tx.policy ?? "direct-only";
-        const direct = isDirectCall(text, config.tx.callsign);
-        if (policy === "direct-only" && !direct) {
-          ctx.log?.info?.("[digirig] TX blocked by policy (direct-only)");
-          return;
-        }
-        if (policy === "value-and-wait") {
-          if (!direct) {
-            ctx.log?.info?.("[digirig] TX blocked by policy (value-and-wait)");
+        const lastFragment = rxBuffer[rxBuffer.length - 1];
+        if (lastFragment) {
+          const lowerLast = lastFragment.toLowerCase();
+          const lowerText = normalizedRx.toLowerCase();
+          if (lowerLast.endsWith(" usb") && (lowerText.startsWith("c ") || lowerText.startsWith("c-"))) {
+            rxBuffer[rxBuffer.length - 1] = `${lastFragment} ${normalizedRx}`;
             return;
           }
-          await delay(4000);
         }
 
-        const envelopeOptions = runtime.channel.reply.resolveEnvelopeFormatOptions(cfg);
-        const body = runtime.channel.reply.formatAgentEnvelope({
-          channel: "DigiRig",
-          from: "radio",
-          timestamp: Date.now(),
-          envelope: envelopeOptions,
-          body: text,
-        });
-
-        const ctxPayload = runtime.channel.reply.finalizeInboundContext({
-          Body: body,
-          RawBody: text,
-          CommandBody: text,
-          BodyForAgent: text,
-          BodyForCommands: text,
-          CommandSource: "channel",
-          CommandTargetSessionKey: route.sessionKey,
-          From: "digirig:radio",
-          To: "digirig:radio",
-          SessionKey: route.sessionKey,
-          AccountId: route.accountId,
-          ChatType: "direct",
-          ConversationLabel: "radio",
-          SenderName: "radio",
-          SenderId: "radio",
-          Provider: "digirig",
-          Surface: "digirig",
-          MessageSid: `digirig-${Date.now()}`,
-          OriginatingChannel: "digirig",
-          OriginatingTo: "digirig:radio",
-          CommandAuthorized: true,
-        });
-
-        const storePath = runtime.channel.session.resolveStorePath(cfg.session?.store, {
-          agentId: route.agentId,
-        });
-        await runtime.channel.session.recordInboundSession({
-          storePath,
-          sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
-          ctx: ctxPayload,
-          onRecordError: (err) =>
-            ctx.log?.error?.(`[digirig] session record error: ${String(err)}`),
-        });
-
-        const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
-          cfg,
-          agentId: route.agentId,
-          channel: "digirig",
-          accountId: route.accountId,
-        });
-
-        const dispatchStartAt = Date.now();
-        let firstTxAt = 0;
-        let speakMs = 0;
-        ctx.log?.info?.("[digirig] dispatch reply start");
-        const dispatchResult = await runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
-          ctx: ctxPayload,
-          cfg,
-          dispatcherOptions: {
-            ...prefixOptions,
-            deliver: async (payload) => {
-              if (!payload.text) {
-                return;
-              }
-              const shortReply = formatRadioReply(payload.text);
-              if (!shortReply) {
-                return;
-              }
-              const txText = appendCallsign(shortReply, config.tx.callsign);
-              ctx.log?.info?.(`[digirig] reply deliver: ${txText}`);
-              if (!firstTxAt) {
-                firstTxAt = Date.now();
-              }
-              const speakStartAt = Date.now();
-              await speak(txText);
-              speakMs = Date.now() - speakStartAt;
-            },
-            onError: (err, info) =>
-              ctx.log?.error?.(`[digirig] ${info.kind} reply failed: ${String(err)}`),
-          },
-          replyOptions: {
-            onModelSelected,
-            onAgentRunStart: (runId) => ctx.log?.info?.(`[digirig] agent run start: ${runId}`),
-            disableBlockStreaming: true,
-          },
-        });
-        const dispatchEndAt = Date.now();
-        const counts = dispatchResult?.counts ?? {};
-        const timing = {
-          rxToSttStartMs: sttStartAt - rxEndAt,
-          sttMs: sttEndAt - sttStartAt,
-          routeMs: routeEndAt - routeStartAt,
-          dispatchMs: dispatchEndAt - dispatchStartAt,
-          rxToFirstTxMs: firstTxAt ? firstTxAt - rxEndAt : null,
-          speakMs: speakMs || null,
-          totalRxToDoneMs: dispatchEndAt - rxEndAt,
-          totalUtteranceToDoneMs: dispatchEndAt - utteranceStartAt,
-        };
-        ctx.log?.info?.(
-          `[digirig] dispatch reply complete (counts=${JSON.stringify(counts)} timing=${JSON.stringify(timing)})`,
-        );
+        rxBuffer.push(normalizedRx);
+        ctx.log?.info?.(`[digirig] RX fragment: ${normalizedRx}`);
+        return;
       } catch (err) {
         ctx.log?.error?.(`[digirig] inbound error: ${String(err)}`);
       }

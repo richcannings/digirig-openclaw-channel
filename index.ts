@@ -178,6 +178,10 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
       if (policy !== "proactive") {
         throw new Error("digirig_tx requires tx.policy=proactive");
       }
+      const allowToolTx = cfg.channels?.digirig?.tx?.allowToolTx ?? true;
+      if (!allowToolTx) {
+        throw new Error("digirig_tx is disabled by tx.allowToolTx=false");
+      }
       const callsign = (params?.callsign ?? cfg.channels?.digirig?.tx?.callsign ?? DEFAULT_TX_CALLSIGN).trim();
       const runtime = getRuntime();
       await runtime.speak(appendCallsign(text, callsign));
