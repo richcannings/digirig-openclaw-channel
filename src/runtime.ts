@@ -59,7 +59,7 @@ function normalizeSttText(text: string): string {
   if (!trimmed) return "";
   const lower = trimmed.toLowerCase();
   if (lower === "[blank_audio]" || lower === "(blank audio)") return "";
-  if (lower === "(beep)" || lower === "[beep]") return "";
+  if (/\bbeep\b/i.test(trimmed)) return "";
   if (/^\s*[\[(].*[\])]\s*$/.test(trimmed)) return "";
 
   // Drop stray 1–3 character prefix fragments (e.g., "GC.") when followed by a sentence.
@@ -132,6 +132,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let rxAcked = false;
   let rxSessionId = 0;
   let rxClosing = false;
+  let lastRxFinalAt = 0;
 
   const logTranscript = async (speaker: "RX" | "TX", text: string) => {
     if (!text.trim()) return;
@@ -271,6 +272,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       }
       lastRxText = text;
       lastRxAt = Date.now();
+      lastRxFinalAt = lastRxAt;
       await logTranscript("RX", text);
       updateStatus({ lastInboundAt: Date.now() });
 
@@ -551,8 +553,11 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           const policy = config.tx.policy ?? "direct-only";
           const direct = isDirectCall(normalizedRx, config.tx.callsign);
           if (policy === "proactive" || direct) {
-            rxAcked = true;
-            void speak(appendCallsign("Copy and stand by.", config.tx.callsign));
+            const now = Date.now();
+            if (now - lastRxFinalAt > 5000) {
+              rxAcked = true;
+              void speak(appendCallsign("Copy and stand by.", config.tx.callsign));
+            }
           }
         }
         return;
