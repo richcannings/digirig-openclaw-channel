@@ -116,6 +116,11 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     await fs.appendFile(dupePath, `${line}\n`);
   };
 
+  const logFragment = async (text: string) => {
+    const ts = new Date().toISOString();
+    await appendTranscript(`[${ts}] RX(fragment): ${text}`);
+  };
+
   let lastRxText = "";
   let lastRxAt = 0;
   let rxBuffer: string[] = [];
@@ -124,6 +129,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let lastTxText = "";
   let lastTxAt = 0;
   let rxFinalized = false;
+  let rxAcked = false;
+  let rxSessionId = 0;
+  let rxClosing = false;
 
   const logTranscript = async (speaker: "RX" | "TX", text: string) => {
     if (!text.trim()) return;
@@ -230,12 +238,13 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     );
 
     const scheduleFinalizeRx = () => {
+      const sessionId = rxSessionId;
       if (rxFinalizeTimer) {
         clearTimeout(rxFinalizeTimer);
       }
       rxFinalizeTimer = setTimeout(() => {
         rxFinalizeTimer = null;
-        if (!rxFinalized) {
+        if (!rxFinalized && sessionId === rxSessionId) {
           void finalizeRx();
         }
       }, 200);
@@ -371,6 +380,16 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             if (!firstTxAt) {
               firstTxAt = Date.now();
             }
+            if (rxClosing && /\bcopy\b/i.test(shortReply)) {
+              ctx.log?.info?.("[digirig] TX replaced (closing)");
+              const closingText = appendCallsign("Thanks, seven three.", config.tx.callsign);
+              await speak(closingText);
+              return;
+            }
+            if (rxAcked && /\bcopy\b/i.test(shortReply)) {
+              ctx.log?.info?.("[digirig] TX skipped (ack already sent)");
+              return;
+            }
             const speakStartAt = Date.now();
             await speak(txText);
             speakMs = Date.now() - speakStartAt;
@@ -430,6 +449,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       recordingFrames = [];
       latestStreamText = "";
       rxFinalized = false;
+      rxAcked = false;
+      rxClosing = false;
+      rxSessionId += 1;
       if (rxFinalizeTimer) {
         clearTimeout(rxFinalizeTimer);
         rxFinalizeTimer = null;
@@ -512,12 +534,27 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           const lowerText = normalizedRx.toLowerCase();
           if (lowerLast.endsWith(" usb") && (lowerText.startsWith("c ") || lowerText.startsWith("c-"))) {
             rxBuffer[rxBuffer.length - 1] = `${lastFragment} ${normalizedRx}`;
+            await logFragment(rxBuffer[rxBuffer.length - 1]);
             return;
           }
         }
 
         rxBuffer.push(normalizedRx);
-        ctx.log?.info?.(`[digirig] RX fragment: ${normalizedRx}`);
+        await logFragment(normalizedRx);
+
+        if (!rxClosing) {
+          const closingRegex = /\b(thanks|thank you|that's it|that\s+is\s+it|73|seven\s+three|clear|goodbye|bye|signing\s+off)\b/i;
+          rxClosing = closingRegex.test(normalizedRx);
+        }
+
+        if (!rxAcked && !rxClosing) {
+          const policy = config.tx.policy ?? "direct-only";
+          const direct = isDirectCall(normalizedRx, config.tx.callsign);
+          if (policy === "proactive" || direct) {
+            rxAcked = true;
+            void speak(appendCallsign("Copy and stand by.", config.tx.callsign));
+          }
+        }
         return;
       } catch (err) {
         ctx.log?.error?.(`[digirig] inbound error: ${String(err)}`);
