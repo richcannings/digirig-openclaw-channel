@@ -15,6 +15,7 @@ import {
   DEFAULT_RX_PRE_ROLL_MS,
   DEFAULT_RX_ENERGY_LOG_INTERVAL_MS,
   DEFAULT_TX_CALLSIGN,
+  DEFAULT_TX_POLICY,
   DEFAULT_STT_TIMEOUT_MS,
   DEFAULT_STT_STREAM_URL,
   DEFAULT_STT_STREAM_INTERVAL_MS,
@@ -93,6 +94,9 @@ const DigirigSttSchema = z.object({
 const DigirigTxSchema = z
   .object({
     callsign: z.string().min(1).default(DEFAULT_TX_CALLSIGN),
+    policy: z
+      .enum(["direct-only", "value-and-wait", "proactive"])
+      .default(DEFAULT_TX_POLICY),
   })
   .default({});
 

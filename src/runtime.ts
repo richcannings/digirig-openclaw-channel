@@ -25,6 +25,18 @@ export function appendCallsign(text: string, callsign?: string): string {
   return `${trimmed} ${callsign}`;
 }
 
+function isDirectCall(text: string, callsign?: string): boolean {
+  const upper = text.toUpperCase();
+  if (upper.includes("OVERLORD")) return true;
+  if (!callsign) return false;
+  const call = callsign.toUpperCase();
+  if (upper.includes(call)) return true;
+  const callBare = call.replace(/[^A-Z0-9]/g, "");
+  const textBare = upper.replace(/[^A-Z0-9]/g, "");
+  return callBare.length > 0 && textBare.includes(callBare);
+}
+
+
 export type DigirigRuntime = {
   start: (ctx: ChannelGatewayStartContext<DigirigConfig>) => Promise<{ stop: () => void }>;
   stop: () => Promise<void>;
@@ -47,6 +59,15 @@ function normalizeSttText(text: string): string {
   const lower = trimmed.toLowerCase();
   if (lower === "[blank_audio]" || lower === "(blank audio)") return "";
   if (/^\s*[\[(].*[\])]\s*$/.test(trimmed)) return "";
+
+  // Drop stray 1–3 character prefix fragments (e.g., "GC.") when followed by a sentence.
+  const tokens = trimmed.split(/\s+/);
+  if (tokens.length > 1 && tokens[0].length <= 3) {
+    const remainder = tokens.slice(1).join(" ");
+    if (remainder.length >= 12) {
+      return remainder.trim();
+    }
+  }
   return trimmed;
 }
 
@@ -86,6 +107,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     await fs.appendFile(logPath, `${line}\n`);
   };
 
+  let lastRxText = "";
+  let lastRxAt = 0;
+
   const logTranscript = async (speaker: "RX" | "TX", text: string) => {
     if (!text.trim()) return;
     const ts = new Date().toISOString();
@@ -101,6 +125,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     }
     outboundQueue = outboundQueue.then(async () => {
       await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 2000);
+      audioMonitor.muteFor(2000);
       await ptt.withTx(async () => {
         const tts = await synthesizeTts(runtime, text);
         await playPcm({
@@ -110,6 +135,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           pcm: tts.audioBuffer,
         });
       });
+      // Mute RX briefly to avoid TX bleed/echo triggering RX.
+      audioMonitor.muteFor(2000);
     });
     await outboundQueue;
   };
@@ -239,12 +266,24 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
               ctx.log?.debug?.(`[digirig] STT stream refresh failed: ${String(err)}`),
             );
         }
+
+        // Join short suffix fragments like "C connector" when the previous RX ended in "USB".
+        if (text && Date.now() - lastRxAt < 12000) {
+          const last = lastRxText.trim();
+          const lowerLast = last.toLowerCase();
+          const lowerText = text.toLowerCase();
+          if (lowerLast.endsWith(" usb") && (lowerText.startsWith("c ") || lowerText.startsWith("c-"))) {
+            text = `${last} ${text}`;
+          }
+        }
         const sttEndAt = Date.now();
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
         await logTranscript("RX", text);
         if (!text.trim()) {
           return;
         }
+        lastRxText = text.trim();
+        lastRxAt = Date.now();
         updateStatus({ lastInboundAt: Date.now() });
 
         const cfg = runtime.config.loadConfig();
@@ -259,6 +298,20 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           },
         });
         const routeEndAt = Date.now();
+
+        const policy = config.tx.policy ?? "direct-only";
+        const direct = isDirectCall(text, config.tx.callsign);
+        if (policy === "direct-only" && !direct) {
+          ctx.log?.info?.("[digirig] TX blocked by policy (direct-only)");
+          return;
+        }
+        if (policy === "value-and-wait") {
+          if (!direct) {
+            ctx.log?.info?.("[digirig] TX blocked by policy (value-and-wait)");
+            return;
+          }
+          await delay(4000);
+        }
 
         const envelopeOptions = runtime.channel.reply.resolveEnvelopeFormatOptions(cfg);
         const body = runtime.channel.reply.formatAgentEnvelope({

@@ -23,7 +23,7 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
     reactions: false,
     threads: false,
     media: false,
-    nativeCommands: false,
+    nativeCommands: true,
     blockStreaming: true,
   },
   reload: { configPrefixes: ["channels.digirig"] },
@@ -120,10 +120,38 @@ function getRuntime(): DigirigRuntime {
   return runtime;
 }
 
-export default function register(api: { runtime: unknown }) {
+export default function register(api: { runtime: unknown; registerCommand: Function }) {
   setDigirigRuntime(api.runtime);
   // @ts-expect-error plugin api shape is provided by OpenClaw at runtime
   api.registerChannel({ plugin: digirigPlugin });
+
+  // Manual TX command: /digirig tx <text>
+  // @ts-expect-error plugin api shape is provided by OpenClaw at runtime
+  api.registerCommand({
+    name: "digirig",
+    description: "DigiRig commands (tx)",
+    acceptsArgs: true,
+    requireAuth: false,
+    handler: async (ctx: { args?: string }) => {
+      const raw = (ctx.args ?? "").trim();
+      if (!raw) {
+        return { text: "Usage: /digirig tx <text>" };
+      }
+      const [cmd, ...rest] = raw.split(/\s+/);
+      if (cmd.toLowerCase() !== "tx") {
+        return { text: "Usage: /digirig tx <text>" };
+      }
+      const text = rest.join(" ").trim();
+      if (!text) {
+        return { text: "Usage: /digirig tx <text>" };
+      }
+      const runtime = getRuntime();
+      const cfg = getDigirigRuntime().config.loadConfig();
+      const callsign = cfg.channels?.digirig?.tx?.callsign ?? DEFAULT_TX_CALLSIGN;
+      await runtime.speak(appendCallsign(text, callsign));
+      return { text: "✅ Transmitted via DigiRig" };
+    },
+  });
 }
 
 export { digirigPlugin };
