@@ -1,5 +1,6 @@
 import type { ChannelPlugin } from "openclaw/plugin-sdk";
 import { DEFAULT_ACCOUNT_ID, buildChannelConfigSchema } from "openclaw/plugin-sdk";
+import { Type } from "@sinclair/typebox";
 import { DigirigConfigSchema, type DigirigConfig } from "./src/config.js";
 import { DEFAULT_TX_CALLSIGN } from "./src/defaults.js";
 import { appendCallsign, createDigirigRuntime, type DigirigRuntime } from "./src/runtime.js";
@@ -120,7 +121,7 @@ function getRuntime(): DigirigRuntime {
   return runtime;
 }
 
-export default function register(api: { runtime: unknown; registerCommand: Function }) {
+export default function register(api: { runtime: unknown; registerCommand: Function; registerTool: Function }) {
   setDigirigRuntime(api.runtime);
   // @ts-expect-error plugin api shape is provided by OpenClaw at runtime
   api.registerChannel({ plugin: digirigPlugin });
@@ -150,6 +151,37 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
       const callsign = cfg.channels?.digirig?.tx?.callsign ?? DEFAULT_TX_CALLSIGN;
       await runtime.speak(appendCallsign(text, callsign));
       return { text: "✅ Transmitted via DigiRig" };
+    },
+  });
+
+  // Agent tool: digirig_tx
+  // @ts-expect-error plugin api shape is provided by OpenClaw at runtime
+  api.registerTool({
+    name: "digirig_tx",
+    label: "DigiRig TX",
+    description: "Transmit text over DigiRig (respects tx.policy=proactive).",
+    parameters: Type.Object({
+      text: Type.String({ description: "Text to transmit over DigiRig" }),
+      callsign: Type.Optional(Type.String({ description: "Override callsign" })),
+    }),
+    async execute(_toolCallId: string, params: { text?: string; callsign?: string }) {
+      const json = (payload: unknown) => ({
+        content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
+        details: payload,
+      });
+      const text = String(params?.text ?? "").trim();
+      if (!text) {
+        throw new Error("text is required");
+      }
+      const cfg = getDigirigRuntime().config.loadConfig();
+      const policy = cfg.channels?.digirig?.tx?.policy ?? "direct-only";
+      if (policy !== "proactive") {
+        throw new Error("digirig_tx requires tx.policy=proactive");
+      }
+      const callsign = (params?.callsign ?? cfg.channels?.digirig?.tx?.callsign ?? DEFAULT_TX_CALLSIGN).trim();
+      const runtime = getRuntime();
+      await runtime.speak(appendCallsign(text, callsign));
+      return json({ ok: true, transmitted: true });
     },
   });
 }

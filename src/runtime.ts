@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createReplyPrefixOptions, type ChannelGatewayStartContext } from "openclaw/plugin-sdk";
@@ -101,6 +102,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   const logDir = join(homedir(), ".openclaw", "logs");
   const logDate = new Date().toISOString().slice(0, 10);
   const logPath = join(logDir, `digirig-${logDate}.log`);
+  let logger: ChannelGatewayStartContext<DigirigConfig>["log"] | null = null;
 
   const appendTranscript = async (line: string) => {
     await fs.mkdir(logDir, { recursive: true });
@@ -123,20 +125,35 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     if (!config.ptt.rts) {
       return;
     }
+    const captureMute = getCaptureMuteConfig(config.audio.inputDevice);
+    const safeSetCaptureMute = async (muted: boolean) => {
+      if (!captureMute) return;
+      try {
+        await setCaptureMute(captureMute, muted);
+      } catch (err) {
+        logger?.error?.(
+          `[digirig] capture mute ${muted ? "on" : "off"} failed: ${String(err)}`,
+        );
+      }
+    };
+
     outboundQueue = outboundQueue.then(async () => {
       await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 2000);
-      audioMonitor.muteFor(2000);
       await ptt.withTx(async () => {
         const tts = await synthesizeTts(runtime, text);
-        await playPcm({
-          device: config.audio.outputDevice,
-          sampleRate: tts.sampleRate,
-          channels: 1,
-          pcm: tts.audioBuffer,
-        });
+        await safeSetCaptureMute(true);
+        try {
+          await playPcm({
+            device: config.audio.outputDevice,
+            sampleRate: tts.sampleRate,
+            channels: 1,
+            pcm: tts.audioBuffer,
+          });
+        } finally {
+          await safeSetCaptureMute(false);
+        }
       });
-      // Mute RX briefly to avoid TX bleed/echo triggering RX.
-      audioMonitor.muteFor(2000);
+      await logTranscript("TX", text.trim());
     });
     await outboundQueue;
   };
@@ -145,6 +162,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     if (stopped) {
       return { stop: () => {} };
     }
+    logger = ctx.log ?? null;
 
     const updateStatus = (patch: Partial<{
       running: boolean;
@@ -278,12 +296,17 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         }
         const sttEndAt = Date.now();
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
-        await logTranscript("RX", text);
         if (!text.trim()) {
           return;
         }
-        lastRxText = text.trim();
+
+        const normalizedRx = normalizeSttText(text);
+        if (!normalizedRx) {
+          return;
+        }
+        lastRxText = normalizedRx;
         lastRxAt = Date.now();
+        await logTranscript("RX", normalizedRx);
         updateStatus({ lastInboundAt: Date.now() });
 
         const cfg = runtime.config.loadConfig();
@@ -383,15 +406,12 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
               }
               const txText = appendCallsign(shortReply, config.tx.callsign);
               ctx.log?.info?.(`[digirig] reply deliver: ${txText}`);
-              audioMonitor.muteFor(800);
               if (!firstTxAt) {
                 firstTxAt = Date.now();
               }
               const speakStartAt = Date.now();
               await speak(txText);
               speakMs = Date.now() - speakStartAt;
-              audioMonitor.muteFor(800);
-              await logTranscript("TX", txText);
             },
             onError: (err, info) =>
               ctx.log?.error?.(`[digirig] ${info.kind} reply failed: ${String(err)}`),
@@ -467,6 +487,48 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   };
 
   return { start, stop, speak };
+}
+
+type CaptureMuteConfig = {
+  card: number;
+  control: string;
+};
+
+function parseAlsaCard(device: string): number | null {
+  const match = device.match(/(?:plughw|hw):(\d+),/);
+  if (!match) return null;
+  const card = Number(match[1]);
+  return Number.isFinite(card) ? card : null;
+}
+
+function getCaptureMuteConfig(device: string): CaptureMuteConfig | null {
+  const card = parseAlsaCard(device);
+  if (card === null) return null;
+  return { card, control: "Mic" };
+}
+
+async function setCaptureMute(cfg: CaptureMuteConfig, muted: boolean): Promise<void> {
+  const args = ["-c", String(cfg.card), "set", cfg.control, muted ? "nocap" : "cap"];
+  await runCommand("amixer", args);
+}
+
+async function runCommand(cmd: string, args: string[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn(cmd, args);
+    let stderr = "";
+    proc.stderr?.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    proc.on("error", reject);
+    proc.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        const details = stderr.trim();
+        reject(new Error(`${cmd} ${args.join(" ")} exited ${code ?? "?"}${details ? `: ${details}` : ""}`));
+      }
+    });
+  });
 }
 
 async function waitForClearChannel(
