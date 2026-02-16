@@ -1,6 +1,8 @@
 {
   "id": "digirig",
-  "channels": ["digirig"],
+  "channels": [
+    "digirig"
+  ],
   "uiHints": {
     "audio.inputDevice": {
       "placeholder": "plughw:0,0"
@@ -28,25 +30,11 @@
     "rx.energyThreshold": {
       "label": "RX Energy Threshold"
     },
-    "rx.energyLogIntervalMs": {
-      "label": "RX Energy Log Interval (ms)",
-      "help": "Log average RMS energy every N ms (0 disables).",
-      "advanced": true
-    },
-    "rx.preRollMs": {
-      "label": "RX Pre-Roll (ms)"
-    },
     "rx.minSpeechMs": {
       "label": "RX Min Speech (ms)"
     },
     "rx.maxSilenceMs": {
       "label": "RX Max Silence (ms)"
-    },
-    "rx.maxRecordMs": {
-      "label": "RX Max Record (ms)"
-    },
-    "rx.busyHoldMs": {
-      "label": "RX Busy Hold (ms)"
     },
     "stt": {
       "label": "Speech Recognition"
@@ -54,18 +42,6 @@
     "stt.streamUrl": {
       "label": "Speech Recognition Stream URL",
       "help": "whisper-server /inference endpoint (e.g. http://127.0.0.1:18080/inference)."
-    },
-    "stt.streamIntervalMs": {
-      "label": "Speech Recognition Stream Interval (ms)",
-      "advanced": true
-    },
-    "stt.streamWindowMs": {
-      "label": "Speech Recognition Stream Window (ms)",
-      "advanced": true
-    },
-    "stt.timeoutMs": {
-      "label": "Speech Recognition Timeout (ms)",
-      "advanced": true
     },
     "stt.server": {
       "label": "Whisper Server",
@@ -105,68 +81,144 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "enabled": { "type": "boolean" },
+      "enabled": {
+        "type": "boolean"
+      },
       "audio": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "inputDevice": { "type": "string" },
-          "outputDevice": { "type": "string" },
-          "sampleRate": { "type": "integer", "minimum": 1 }
+          "inputDevice": {
+            "type": "string"
+          },
+          "outputDevice": {
+            "type": "string"
+          },
+          "sampleRate": {
+            "type": "integer",
+            "minimum": 1
+          }
         }
       },
       "ptt": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "device": { "type": "string" },
-          "rts": { "type": "boolean" },
-          "leadMs": { "type": "integer", "minimum": 0 },
-          "tailMs": { "type": "integer", "minimum": 0 }
+          "device": {
+            "type": "string"
+          },
+          "rts": {
+            "type": "boolean"
+          },
+          "leadMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "tailMs": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       },
       "rx": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "energyThreshold": { "type": "number", "minimum": 0 },
-          "energyLogIntervalMs": { "type": "integer", "minimum": 0 },
-          "frameMs": { "type": "integer", "minimum": 5 },
-          "preRollMs": { "type": "integer", "minimum": 0 },
-          "minSpeechMs": { "type": "integer", "minimum": 50 },
-          "maxSilenceMs": { "type": "integer", "minimum": 100 },
-          "maxRecordMs": { "type": "integer", "minimum": 1000 },
-          "busyHoldMs": { "type": "integer", "minimum": 50 }
+          "energyThreshold": {
+            "type": "number",
+            "minimum": 0
+          },
+          "energyLogIntervalMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "frameMs": {
+            "type": "integer",
+            "minimum": 5
+          },
+          "preRollMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minSpeechMs": {
+            "type": "integer",
+            "minimum": 50
+          },
+          "maxSilenceMs": {
+            "type": "integer",
+            "minimum": 100
+          },
+          "maxRecordMs": {
+            "type": "integer",
+            "minimum": 1000
+          },
+          "busyHoldMs": {
+            "type": "integer",
+            "minimum": 50
+          }
         }
       },
       "tx": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "callsign": { "type": "string" },
-          "policy": { "type": "string" },
-          "allowToolTx": { "type": "boolean" }
+          "callsign": {
+            "type": "string"
+          },
+          "policy": {
+            "type": "string"
+          },
+          "allowToolTx": {
+            "type": "boolean"
+          }
         }
       },
       "stt": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "streamUrl": { "type": "string" },
-          "streamIntervalMs": { "type": "integer", "minimum": 100 },
-          "streamWindowMs": { "type": "integer", "minimum": 500 },
-          "timeoutMs": { "type": "integer", "minimum": 1000 },
+          "streamUrl": {
+            "type": "string"
+          },
+          "streamIntervalMs": {
+            "type": "integer",
+            "minimum": 100
+          },
+          "streamWindowMs": {
+            "type": "integer",
+            "minimum": 500
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1000
+          },
           "server": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "autoStart": { "type": "boolean" },
-              "command": { "type": "string" },
-              "args": { "type": "string" },
-              "modelPath": { "type": "string" },
-              "host": { "type": "string" },
-              "port": { "type": "integer", "minimum": 1 },
-              "restartMs": { "type": "integer", "minimum": 0 }
+              "autoStart": {
+                "type": "boolean"
+              },
+              "command": {
+                "type": "string"
+              },
+              "args": {
+                "type": "string"
+              },
+              "modelPath": {
+                "type": "string"
+              },
+              "host": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "restartMs": {
+                "type": "integer",
+                "minimum": 0
+              }
             }
           }
         }

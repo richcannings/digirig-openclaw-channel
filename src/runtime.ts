@@ -125,8 +125,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let lastTxAt = 0;
   let rxFinalized = false;
   let rxSessionId = 0;
-  let lastRxFragment = "";
-  let lastRxFragmentAt = 0;
   let lastRxEndAt = 0;
   let lastTxStartAt = 0;
 
@@ -426,8 +424,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       rxBuffer = [];
       rxStartAt = 0;
       rxFinalized = true;
-      lastRxFragment = "";
-      lastRxFragmentAt = 0;
     };
 
     audioMonitor.on("recording-end", (evt) => {
@@ -456,8 +452,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       recordingFrames = [];
       latestStreamText = "";
       rxFinalized = false;
-      lastRxFragment = "";
-      lastRxFragmentAt = 0;
       rxSessionId += 1;
       if (rxFinalizeTimer) {
         clearTimeout(rxFinalizeTimer);
@@ -544,19 +538,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             return;
           }
         }
-
-        const now = Date.now();
-        if (normalizedRx === lastRxFragment && now - lastRxFragmentAt < 10000) {
-          const ts = new Date().toISOString();
-          const ageMs = now - lastRxFragmentAt;
-          ctx.log?.info?.("[digirig] RX fragment dropped (duplicate)");
-          await logDupe(
-            `[${ts}] kind=rx-fragment reason=duplicate windowMs=10000 ageMs=${ageMs} lastAt=${new Date(lastRxFragmentAt).toISOString()} currentAt=${ts} last=${JSON.stringify(lastRxFragment)} current=${JSON.stringify(normalizedRx)}`,
-          );
-          return;
-        }
-        lastRxFragment = normalizedRx;
-        lastRxFragmentAt = now;
 
         rxBuffer.push(normalizedRx);
         return;
