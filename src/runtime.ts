@@ -133,6 +133,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let rxSessionId = 0;
   let rxClosing = false;
   let lastRxFinalAt = 0;
+  let lastRxFragment = "";
+  let lastRxFragmentAt = 0;
+  let lastRxEndAt = 0;
+  let lastTxStartAt = 0;
 
   const logTranscript = async (speaker: "RX" | "TX", text: string) => {
     if (!text.trim()) return;
@@ -173,6 +177,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       lastTxText = trimmed;
       lastTxAt = Date.now();
       await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 60000);
+      lastTxStartAt = Date.now();
       await ptt.withTx(async () => {
         const tts = await synthesizeTts(runtime, text);
         await safeSetCaptureMute(true);
@@ -225,7 +230,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       ctx.log?.info?.(`[digirig] RX start (energy=${evt?.energy?.toFixed?.(4) ?? "?"})`);
       updateStatus({ lastEventAt: Date.now() });
     });
-    let lastRxEndAt = 0;
+    // lastRxEndAt is tracked at the runtime scope
     let recordingFrames: Buffer[] = [];
     let streamTimer: NodeJS.Timeout | null = null;
     let streamInFlight = false;
@@ -361,6 +366,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       });
 
       const dispatchStartAt = Date.now();
+      const rxEndAtSnapshot = lastRxEndAt;
       let firstTxAt = 0;
       let speakMs = 0;
       ctx.log?.info?.("[digirig] dispatch reply start");
@@ -407,22 +413,32 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       });
       const dispatchEndAt = Date.now();
       const counts = dispatchResult?.counts ?? {};
+      const rxEndAt = rxEndAtSnapshot || null;
+      const responseTimeMs = firstTxAt && rxEndAt ? Math.max(0, firstTxAt - rxEndAt) : null;
       const timing = {
         rxToSttStartMs: null,
         sttMs: null,
         routeMs: routeEndAt - routeStartAt,
         dispatchMs: dispatchEndAt - dispatchStartAt,
-        rxToFirstTxMs: firstTxAt ? firstTxAt - lastRxEndAt : null,
+        rxToFirstTxMs: firstTxAt && rxEndAt ? Math.max(0, firstTxAt - rxEndAt) : null,
+        responseTimeMs,
         speakMs: speakMs || null,
-        totalRxToDoneMs: dispatchEndAt - lastRxEndAt,
+        totalRxToDoneMs: rxEndAt ? dispatchEndAt - rxEndAt : null,
         totalUtteranceToDoneMs: rxStartAt ? dispatchEndAt - rxStartAt : null,
       };
       ctx.log?.info?.(
         `[digirig] dispatch reply complete (counts=${JSON.stringify(counts)} timing=${JSON.stringify(timing)})`,
       );
+      if (responseTimeMs !== null) {
+        const metricTs = new Date().toISOString();
+        ctx.log?.info?.(`[digirig] responseTimeMs=${responseTimeMs}`);
+        await appendTranscript(`[${metricTs}] METRIC: responseTimeMs=${responseTimeMs}`);
+      }
       rxBuffer = [];
       rxStartAt = 0;
       rxFinalized = true;
+      lastRxFragment = "";
+      lastRxFragmentAt = 0;
     };
 
     audioMonitor.on("recording-end", (evt) => {
@@ -453,6 +469,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       rxFinalized = false;
       rxAcked = false;
       rxClosing = false;
+      lastRxFragment = "";
+      lastRxFragmentAt = 0;
       rxSessionId += 1;
       if (rxFinalizeTimer) {
         clearTimeout(rxFinalizeTimer);
@@ -541,6 +559,19 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           }
         }
 
+        const now = Date.now();
+        if (normalizedRx === lastRxFragment && now - lastRxFragmentAt < 10000) {
+          const ts = new Date().toISOString();
+          const ageMs = now - lastRxFragmentAt;
+          ctx.log?.info?.("[digirig] RX fragment dropped (duplicate)");
+          await logDupe(
+            `[${ts}] kind=rx-fragment reason=duplicate windowMs=10000 ageMs=${ageMs} lastAt=${new Date(lastRxFragmentAt).toISOString()} currentAt=${ts} last=${JSON.stringify(lastRxFragment)} current=${JSON.stringify(normalizedRx)}`,
+          );
+          return;
+        }
+        lastRxFragment = normalizedRx;
+        lastRxFragmentAt = now;
+
         rxBuffer.push(normalizedRx);
         await logFragment(normalizedRx);
 
@@ -549,17 +580,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           rxClosing = closingRegex.test(normalizedRx);
         }
 
-        if (!rxAcked && !rxClosing) {
-          const policy = config.tx.policy ?? "direct-only";
-          const direct = isDirectCall(normalizedRx, config.tx.callsign);
-          if (policy === "proactive" || direct) {
-            const now = Date.now();
-            if (now - lastRxFinalAt > 5000) {
-              rxAcked = true;
-              void speak(appendCallsign("Copy and stand by.", config.tx.callsign));
-            }
-          }
-        }
         return;
       } catch (err) {
         ctx.log?.error?.(`[digirig] inbound error: ${String(err)}`);
