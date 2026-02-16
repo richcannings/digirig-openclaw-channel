@@ -116,11 +116,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     await fs.appendFile(dupePath, `${line}\n`);
   };
 
-  const logFragment = async (text: string) => {
-    const ts = new Date().toISOString();
-    await appendTranscript(`[${ts}] RX(fragment): ${text}`);
-  };
-
   let lastRxText = "";
   let lastRxAt = 0;
   let rxBuffer: string[] = [];
@@ -129,10 +124,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let lastTxText = "";
   let lastTxAt = 0;
   let rxFinalized = false;
-  let rxAcked = false;
   let rxSessionId = 0;
-  let rxClosing = false;
-  let lastRxFinalAt = 0;
   let lastRxFragment = "";
   let lastRxFragmentAt = 0;
   let lastRxEndAt = 0;
@@ -277,7 +269,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       }
       lastRxText = text;
       lastRxAt = Date.now();
-      lastRxFinalAt = lastRxAt;
       await logTranscript("RX", text);
       updateStatus({ lastInboundAt: Date.now() });
 
@@ -296,6 +287,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
       const policy = config.tx.policy ?? "direct-only";
       const direct = isDirectCall(text, config.tx.callsign);
+      const closingRegex = /\b(thanks|thank you|that's it|that\s+is\s+it|73|seven\s+three|clear|goodbye|bye|signing\s+off)\b/i;
+      const isClosing = closingRegex.test(text);
       if (policy === "direct-only" && !direct) {
         ctx.log?.info?.("[digirig] TX blocked by policy (direct-only)");
         rxBuffer = [];
@@ -388,14 +381,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             if (!firstTxAt) {
               firstTxAt = Date.now();
             }
-            if (rxClosing && /\bcopy\b/i.test(shortReply)) {
+            if (isClosing && /\bcopy\b/i.test(shortReply)) {
               ctx.log?.info?.("[digirig] TX replaced (closing)");
               const closingText = appendCallsign("Thanks, seven three.", config.tx.callsign);
               await speak(closingText);
-              return;
-            }
-            if (rxAcked && /\bcopy\b/i.test(shortReply)) {
-              ctx.log?.info?.("[digirig] TX skipped (ack already sent)");
               return;
             }
             const speakStartAt = Date.now();
@@ -467,8 +456,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       recordingFrames = [];
       latestStreamText = "";
       rxFinalized = false;
-      rxAcked = false;
-      rxClosing = false;
       lastRxFragment = "";
       lastRxFragmentAt = 0;
       rxSessionId += 1;
@@ -554,7 +541,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           const lowerText = normalizedRx.toLowerCase();
           if (lowerLast.endsWith(" usb") && (lowerText.startsWith("c ") || lowerText.startsWith("c-"))) {
             rxBuffer[rxBuffer.length - 1] = `${lastFragment} ${normalizedRx}`;
-            await logFragment(rxBuffer[rxBuffer.length - 1]);
             return;
           }
         }
@@ -573,13 +559,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         lastRxFragmentAt = now;
 
         rxBuffer.push(normalizedRx);
-        await logFragment(normalizedRx);
-
-        if (!rxClosing) {
-          const closingRegex = /\b(thanks|thank you|that's it|that\s+is\s+it|73|seven\s+three|clear|goodbye|bye|signing\s+off)\b/i;
-          rxClosing = closingRegex.test(normalizedRx);
-        }
-
         return;
       } catch (err) {
         ctx.log?.error?.(`[digirig] inbound error: ${String(err)}`);
