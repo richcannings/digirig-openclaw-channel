@@ -125,13 +125,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     const dupePath = join(logDir, `digirig-dupe-${logDate}.log`);
     await fs.appendFile(dupePath, `${line}\n`);
   };
-
-  const logTrace = async (line: string) => {
-    await fs.mkdir(logDir, { recursive: true });
-    const tracePath = join(logDir, `digirig-trace-${logDate}.log`);
-    await fs.appendFile(tracePath, `${line}\n`);
-  };
-
   const loadIdentityAliases = async (): Promise<string[]> => {
     try {
       const identityPath = join(homedir(), ".openclaw", "workspace", "IDENTITY.md");
@@ -167,17 +160,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let lastTxStartAt = 0;
   let lastRxEndReason: string | null = null;
   let rxChunks: string[] = [];
-  let recordingId = 0;
-  let lastRecordingId = 0;
-  let lastRecordingStartAt = 0;
-  let lastRecordingEndAt = 0;
-  let sttStreamLogged = false;
-  let sttFullLogged = false;
   let inferredAliases: string[] = [];
 
   const logTranscript = async (speaker: "RX" | "TX", text: string) => {
     if (!text.trim()) return;
-    const ts = new Date().toISOString();
     await appendTranscript(`[${ts}] ${speaker}: ${text.trim()}`);
   };
 
@@ -205,7 +191,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       // Dedupe TX responses within a short time window.
       if (trimmed && trimmed === lastTxText && Date.now() - lastTxAt < 30000) {
         logger?.info?.("[digirig] TX dropped (duplicate)");
-        const ts = new Date().toISOString();
         await logDupe(
           `[${ts}] kind=tx reason=duplicate windowMs=30000 originalAt=${new Date(lastTxAt).toISOString()} duplicateAt=${ts} original=${JSON.stringify(lastTxText)} duplicate=${JSON.stringify(trimmed)}`,
         );
@@ -271,12 +256,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       updateStatus({ lastError: String(err) });
     });
     audioMonitor.on("recording-start", (evt) => {
-      recordingId += 1;
-      lastRecordingId = recordingId;
-      lastRecordingStartAt = Date.now();
-      ctx.log?.info?.(
-        `[digirig] RX start (id=${recordingId}, energy=${evt?.energy?.toFixed?.(4) ?? "?"})`,
-      );
+      ctx.log?.info?.(`[digirig] RX start (energy=${evt?.energy?.toFixed?.(4) ?? '?'})`);
       updateStatus({ lastEventAt: Date.now() });
     });
     // lastRxEndAt is tracked at the runtime scope
@@ -294,18 +274,11 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
     const scheduleFinalizeRx = () => {
       const sessionId = rxSessionId;
-      const recId = lastRecordingId;
-      const ts = new Date().toISOString();
-      void logTrace(`[${ts}] scheduleFinalizeRx recId=${recId} sessionId=${sessionId}`);
       if (rxFinalizeTimer) {
         clearTimeout(rxFinalizeTimer);
       }
       rxFinalizeTimer = setTimeout(() => {
-        const fireTs = new Date().toISOString();
         rxFinalizeTimer = null;
-        void logTrace(
-          `[${fireTs}] finalizeTimerFire recId=${recId} sessionId=${sessionId} currentSessionId=${rxSessionId} rxFinalized=${rxFinalized}`,
-        );
         if (!rxFinalized && sessionId === rxSessionId) {
           void finalizeRx();
         }
@@ -314,13 +287,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
     const finalizeRx = async () => {
       if (rxFinalized) return;
-      const finTs = new Date().toISOString();
-      void logTrace(
-        `[${finTs}] finalizeRx recId=${lastRecordingId} rxStartAt=${lastRecordingStartAt} rxEndAt=${lastRecordingEndAt} reason=${lastRxEndReason}`,
-      );
-      ctx.log?.info?.(
-        `[digirig] finalizeRx (id=${lastRecordingId}, rxStartAt=${lastRecordingStartAt}, rxEndAt=${lastRecordingEndAt})`,
-      );
+      ctx.log?.info?.('[digirig] finalizeRx');
       const chunkText = normalizeSttText(rxBuffer.join(" "));
       if (!chunkText) {
         rxBuffer = [];
@@ -329,12 +296,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       }
 
       if (lastRxEndReason === "maxRecord") {
-        const ts = new Date().toISOString();
         const bufLen = rxBuffer.length;
         const chunkSource = normalizeSttText(latestStreamText) || chunkText;
-        void logTrace(
-          `[${ts}] stitch-chunk recId=${lastRecordingId} source=${chunkSource ? "stream" : "buffer"} bufLen=${bufLen} len=${chunkSource.length} text=${JSON.stringify(chunkSource.slice(0, 120))}`,
-        );
         if (chunkSource) {
           rxChunks.push(chunkSource);
         }
@@ -344,14 +307,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       }
 
       const text = normalizeSttText([...rxChunks, chunkText].join(" "));
-      const stitchTs = new Date().toISOString();
-      void logTrace(
-        `[${stitchTs}] stitch-final recId=${lastRecordingId} chunks=${rxChunks.length + 1} len=${text.length} text=${JSON.stringify(text.slice(0, 160))}`,
-      );
       rxChunks = [];
       if (text === lastRxText && Date.now() - lastRxAt < 15000) {
         ctx.log?.info?.("[digirig] RX dropped (duplicate finalize)");
-        const ts = new Date().toISOString();
         await logDupe(
           `[${ts}] kind=rx reason=duplicate-finalize windowMs=15000 originalAt=${new Date(lastRxAt).toISOString()} duplicateAt=${ts} original=${JSON.stringify(lastRxText)} duplicate=${JSON.stringify(text)}`,
         );
@@ -525,17 +483,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
     audioMonitor.on("recording-end", (evt) => {
       lastRxEndAt = Date.now();
-      lastRecordingEndAt = lastRxEndAt;
       const reason = evt?.reason ?? "?";
       lastRxEndReason = reason;
       const silenceMs = evt?.silenceMs ?? "?";
-      const endTs = new Date().toISOString();
-      void logTrace(
-        `[${endTs}] recording-end recId=${lastRecordingId} durationMs=${evt?.durationMs ?? "?"} silenceMs=${silenceMs} reason=${reason}`,
-      );
-      ctx.log?.info?.(
-        `[digirig] RX end (id=${lastRecordingId}, durationMs=${evt?.durationMs ?? "?"}, silenceMs=${silenceMs}, reason=${reason})`,
-      );
+      ctx.log?.info?.(`[digirig] RX end (durationMs=${evt?.durationMs ?? '?'}, silenceMs=${silenceMs}, reason=${reason})`);
       if (streamTimer) {
         clearInterval(streamTimer);
         streamTimer = null;
@@ -567,8 +518,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       if (!rxBuffer.length && rxChunks.length === 0) {
         rxStartAt = Date.now();
       }
-      const startTs = new Date().toISOString();
-      void logTrace(`[${startTs}] recording-start recId=${recordingId} sessionId=${rxSessionId}`);
       ctx.log?.info?.("[digirig] STT stream start");
       if (streamTimer) clearInterval(streamTimer);
       streamTimer = setInterval(async () => {
@@ -579,15 +528,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           if (!frames.length) return;
           const pcm = Buffer.concat(frames);
           const wav = pcmToWav(pcm, config.audio.sampleRate, 1);
-          if (!sttStreamLogged) {
-            sttStreamLogged = true;
-            ctx.log?.info?.(`[digirig] STT stream request -> ${config.stt.streamUrl}`);
-          }
           const rawText = await runSttStream({ config: config.stt, wavBuffer: wav });
-          const sttTs = new Date().toISOString();
-          void logTrace(
-            `[${sttTs}] stt-stream rawLen=${rawText.length} raw=${JSON.stringify(rawText.slice(0, 120))}`,
-          );
           const text = normalizeSttText(rawText);
           if (text) latestStreamText = text;
         } catch (err) {
@@ -613,18 +554,11 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         let text = latestStreamText;
         if (!text.trim()) {
           try {
-            if (!sttFullLogged) {
-              sttFullLogged = true;
-              ctx.log?.info?.(`[digirig] STT full request -> ${config.stt.streamUrl}`);
-            }
             const rawText = await runSttStream({
               config: { ...config.stt, timeoutMs: Math.min(config.stt.timeoutMs, 5000) },
               wavBuffer: wav,
             });
             const sttTs = new Date().toISOString();
-            void logTrace(
-              `[${sttTs}] stt-full rawLen=${rawText.length} raw=${JSON.stringify(rawText.slice(0, 120))}`,
-            );
             text = normalizeSttText(rawText);
           } catch (err) {
             ctx.log?.error?.(`[digirig] STT stream failed: ${String(err)}`);
