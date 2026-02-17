@@ -17,7 +17,6 @@ import {
   DEFAULT_RX_ENERGY_LOG_INTERVAL_MS,
   DEFAULT_TX_CALLSIGN,
   DEFAULT_TX_POLICY,
-  DEFAULT_TX_ALLOW_TOOL,
   DEFAULT_TX_ALIASES,
   DEFAULT_STT_TIMEOUT_MS,
   DEFAULT_STT_STREAM_URL,
@@ -101,7 +100,6 @@ const DigirigTxSchema = z
     policy: z
       .enum(["direct-only", "value-and-wait", "proactive"])
       .default(DEFAULT_TX_POLICY),
-    allowToolTx: z.boolean().default(DEFAULT_TX_ALLOW_TOOL),
     aliases: z.string().default(DEFAULT_TX_ALIASES),
   })
   .default({});
