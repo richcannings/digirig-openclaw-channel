@@ -329,13 +329,25 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       }
 
       if (lastRxEndReason === "maxRecord") {
-        rxChunks.push(chunkText);
+        const ts = new Date().toISOString();
+        const bufLen = rxBuffer.length;
+        const chunkSource = normalizeSttText(latestStreamText) || chunkText;
+        void logTrace(
+          `[${ts}] stitch-chunk recId=${lastRecordingId} source=${chunkSource ? "stream" : "buffer"} bufLen=${bufLen} len=${chunkSource.length} text=${JSON.stringify(chunkSource.slice(0, 120))}`,
+        );
+        if (chunkSource) {
+          rxChunks.push(chunkSource);
+        }
         rxBuffer = [];
         rxFinalized = true;
         return;
       }
 
       const text = normalizeSttText([...rxChunks, chunkText].join(" "));
+      const stitchTs = new Date().toISOString();
+      void logTrace(
+        `[${stitchTs}] stitch-final recId=${lastRecordingId} chunks=${rxChunks.length + 1} len=${text.length} text=${JSON.stringify(text.slice(0, 160))}`,
+      );
       rxChunks = [];
       if (text === lastRxText && Date.now() - lastRxAt < 15000) {
         ctx.log?.info?.("[digirig] RX dropped (duplicate finalize)");
@@ -528,6 +540,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         clearInterval(streamTimer);
         streamTimer = null;
       }
+      if (reason === "maxRecord") {
+        void finalizeRx();
+        return;
+      }
       scheduleFinalizeRx();
     });
 
@@ -567,9 +583,12 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             sttStreamLogged = true;
             ctx.log?.info?.(`[digirig] STT stream request -> ${config.stt.streamUrl}`);
           }
-          const text = normalizeSttText(
-            await runSttStream({ config: config.stt, wavBuffer: wav }),
+          const rawText = await runSttStream({ config: config.stt, wavBuffer: wav });
+          const sttTs = new Date().toISOString();
+          void logTrace(
+            `[${sttTs}] stt-stream rawLen=${rawText.length} raw=${JSON.stringify(rawText.slice(0, 120))}`,
           );
+          const text = normalizeSttText(rawText);
           if (text) latestStreamText = text;
         } catch (err) {
           ctx.log?.debug?.(`[digirig] STT stream error: ${String(err)}`);
@@ -598,12 +617,15 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
               sttFullLogged = true;
               ctx.log?.info?.(`[digirig] STT full request -> ${config.stt.streamUrl}`);
             }
-            text = normalizeSttText(
-              await runSttStream({
-                config: { ...config.stt, timeoutMs: Math.min(config.stt.timeoutMs, 5000) },
-                wavBuffer: wav,
-              }),
+            const rawText = await runSttStream({
+              config: { ...config.stt, timeoutMs: Math.min(config.stt.timeoutMs, 5000) },
+              wavBuffer: wav,
+            });
+            const sttTs = new Date().toISOString();
+            void logTrace(
+              `[${sttTs}] stt-full rawLen=${rawText.length} raw=${JSON.stringify(rawText.slice(0, 120))}`,
             );
+            text = normalizeSttText(rawText);
           } catch (err) {
             ctx.log?.error?.(`[digirig] STT stream failed: ${String(err)}`);
           }
