@@ -553,13 +553,13 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           `[digirig] STT start (rxToSttStartMs=${sttStartAt - rxEndAt})`,
         );
         let text = latestStreamText;
-        if (!text.trim()) {
+        const needsFullStt = !text.trim() || text.trim().length < 24;
+        if (needsFullStt) {
           try {
             const rawText = await runSttStream({
               config: { ...config.stt, timeoutMs: Math.min(config.stt.timeoutMs, 5000) },
               wavBuffer: wav,
             });
-            const sttTs = new Date().toISOString();
             text = normalizeSttText(rawText);
           } catch (err) {
             ctx.log?.error?.(`[digirig] STT stream failed: ${String(err)}`);
