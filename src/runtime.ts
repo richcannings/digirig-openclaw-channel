@@ -311,6 +311,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       rxChunks = [];
       if (text === lastRxText && Date.now() - lastRxAt < 15000) {
         ctx.log?.info?.("[digirig] RX dropped (duplicate finalize)");
+        const ts = new Date().toISOString();
         await logDupe(
           `[${ts}] kind=rx reason=duplicate-finalize windowMs=15000 originalAt=${new Date(lastRxAt).toISOString()} duplicateAt=${ts} original=${JSON.stringify(lastRxText)} duplicate=${JSON.stringify(text)}`,
         );
