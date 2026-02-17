@@ -15,9 +15,9 @@ export const DEFAULT_RX_BUSY_HOLD_MS = 1000;
 export const DEFAULT_RX_ENERGY_LOG_INTERVAL_MS = 1000;
 
 export const DEFAULT_TX_CALLSIGN = "N0CALL/AI";
-export const DEFAULT_TX_POLICY = "proactive" as const;
-export const DEFAULT_TX_ALLOW_TOOL = true;
-export const DEFAULT_TX_ALIASES = "";
+export const DEFAULT_TX_POLICY = "direct-only" as const;
+export const DEFAULT_TX_ALLOW_TOOL = false;
+export const DEFAULT_TX_ALIASES = "Overlord,Lord,Seven,7";
 export const DEFAULT_STT_TIMEOUT_MS = 15000;
 export const DEFAULT_STT_STREAM_URL = "http://127.0.0.1:18080/inference";
 export const DEFAULT_STT_STREAM_INTERVAL_MS = 1200;
