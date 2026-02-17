@@ -164,6 +164,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
   const logTranscript = async (speaker: "RX" | "TX", text: string) => {
     if (!text.trim()) return;
+    const ts = new Date().toISOString();
     await appendTranscript(`[${ts}] ${speaker}: ${text.trim()}`);
   };
 
