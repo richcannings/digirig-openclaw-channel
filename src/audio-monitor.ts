@@ -13,6 +13,7 @@ export type AudioMonitorConfig = {
   maxSilenceMs: number;
   maxRecordMs: number;
   busyHoldMs: number;
+  startCooldownMs: number;
 };
 
 export type AudioUtterance = {
@@ -36,6 +37,7 @@ export class AudioMonitor extends EventEmitter {
   private silenceMs = 0;
   private lastActiveAt = 0;
   private lastFrameAt = 0;
+  private lastEndAt = 0;
   private stallTimer: NodeJS.Timeout | null = null;
   private preRollFrames: Buffer[] = [];
   private preRollMaxFrames: number;
@@ -135,6 +137,9 @@ export class AudioMonitor extends EventEmitter {
       if (!this.recording) {
         this.storePreRoll(frame);
         if (energy >= this.config.energyThreshold) {
+          if (Date.now() - this.lastEndAt < this.config.startCooldownMs) {
+            continue;
+          }
           this.recording = true;
           this.emit("recording-start", { energy, at: Date.now() });
           if (this.preRollFrames.length) {
@@ -184,6 +189,7 @@ export class AudioMonitor extends EventEmitter {
   private finishUtterance(reason: "silence" | "maxRecord"): void {
     const pcm = Buffer.concat(this.utteranceBuffers);
     this.recording = false;
+    this.lastEndAt = Date.now();
     this.emit("recording-end", {
       durationMs: this.utteranceMs,
       silenceMs: this.silenceMs,
