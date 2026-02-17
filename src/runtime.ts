@@ -26,15 +26,25 @@ export function appendCallsign(text: string, callsign?: string): string {
   return `${trimmed} ${callsign}`;
 }
 
-function isDirectCall(text: string, callsign?: string): boolean {
+function parseAliases(input?: string): string[] {
+  if (!input) return [];
+  return input
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function isDirectCall(text: string, callsign?: string, aliases: string[] = []): boolean {
   const upper = text.toUpperCase();
-  if (upper.includes("OVERLORD")) return true;
-  if (!callsign) return false;
-  const call = callsign.toUpperCase();
-  if (upper.includes(call)) return true;
-  const callBare = call.replace(/[^A-Z0-9]/g, "");
+  const needles = [callsign, ...aliases].filter(Boolean) as string[];
+  if (!needles.length) return false;
   const textBare = upper.replace(/[^A-Z0-9]/g, "");
-  return callBare.length > 0 && textBare.includes(callBare);
+  return needles.some((needle) => {
+    const call = needle.toUpperCase();
+    if (upper.includes(call)) return true;
+    const callBare = call.replace(/[^A-Z0-9]/g, "");
+    return callBare.length > 0 && textBare.includes(callBare);
+  });
 }
 
 
@@ -116,6 +126,34 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     await fs.appendFile(dupePath, `${line}\n`);
   };
 
+  const logTrace = async (line: string) => {
+    await fs.mkdir(logDir, { recursive: true });
+    const tracePath = join(logDir, `digirig-trace-${logDate}.log`);
+    await fs.appendFile(tracePath, `${line}\n`);
+  };
+
+  const loadIdentityAliases = async (): Promise<string[]> => {
+    try {
+      const identityPath = join(homedir(), ".openclaw", "workspace", "IDENTITY.md");
+      const content = await fs.readFile(identityPath, "utf8");
+      const aliases = new Set<string>();
+      for (const line of content.split(/\r?\n/)) {
+        const nameMatch = line.match(/^-\s*\*\*Name:\*\*\s*(.+)\s*$/i);
+        if (nameMatch?.[1]) aliases.add(nameMatch[1].trim());
+        const akaMatch = line.match(/aka\s+([^\)]+)\)?/i);
+        if (akaMatch?.[1]) {
+          for (const part of akaMatch[1].split(/[\/,|]/)) {
+            const alias = part.trim();
+            if (alias) aliases.add(alias);
+          }
+        }
+      }
+      return Array.from(aliases);
+    } catch {
+      return [];
+    }
+  };
+
   let lastRxText = "";
   let lastRxAt = 0;
   let rxBuffer: string[] = [];
@@ -127,6 +165,15 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let rxSessionId = 0;
   let lastRxEndAt = 0;
   let lastTxStartAt = 0;
+  let lastRxEndReason: string | null = null;
+  let rxChunks: string[] = [];
+  let recordingId = 0;
+  let lastRecordingId = 0;
+  let lastRecordingStartAt = 0;
+  let lastRecordingEndAt = 0;
+  let sttStreamLogged = false;
+  let sttFullLogged = false;
+  let inferredAliases: string[] = [];
 
   const logTranscript = async (speaker: "RX" | "TX", text: string) => {
     if (!text.trim()) return;
@@ -211,13 +258,25 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       });
     };
 
+    if (!config.tx.aliases || !config.tx.aliases.trim()) {
+      inferredAliases = await loadIdentityAliases();
+      if (inferredAliases.length) {
+        ctx.log?.info?.(`[digirig] tx.aliases inferred: ${inferredAliases.join(", ")}`);
+      }
+    }
+
     audioMonitor.on("log", (msg) => ctx.log?.debug?.(`[digirig] ${msg}`));
     audioMonitor.on("error", (err) => {
       ctx.log?.error?.(`[digirig] ${String(err)}`);
       updateStatus({ lastError: String(err) });
     });
     audioMonitor.on("recording-start", (evt) => {
-      ctx.log?.info?.(`[digirig] RX start (energy=${evt?.energy?.toFixed?.(4) ?? "?"})`);
+      recordingId += 1;
+      lastRecordingId = recordingId;
+      lastRecordingStartAt = Date.now();
+      ctx.log?.info?.(
+        `[digirig] RX start (id=${recordingId}, energy=${evt?.energy?.toFixed?.(4) ?? "?"})`,
+      );
       updateStatus({ lastEventAt: Date.now() });
     });
     // lastRxEndAt is tracked at the runtime scope
@@ -235,11 +294,18 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
     const scheduleFinalizeRx = () => {
       const sessionId = rxSessionId;
+      const recId = lastRecordingId;
+      const ts = new Date().toISOString();
+      void logTrace(`[${ts}] scheduleFinalizeRx recId=${recId} sessionId=${sessionId}`);
       if (rxFinalizeTimer) {
         clearTimeout(rxFinalizeTimer);
       }
       rxFinalizeTimer = setTimeout(() => {
+        const fireTs = new Date().toISOString();
         rxFinalizeTimer = null;
+        void logTrace(
+          `[${fireTs}] finalizeTimerFire recId=${recId} sessionId=${sessionId} currentSessionId=${rxSessionId} rxFinalized=${rxFinalized}`,
+        );
         if (!rxFinalized && sessionId === rxSessionId) {
           void finalizeRx();
         }
@@ -248,12 +314,29 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
     const finalizeRx = async () => {
       if (rxFinalized) return;
-      const text = normalizeSttText(rxBuffer.join(" "));
-      if (!text) {
+      const finTs = new Date().toISOString();
+      void logTrace(
+        `[${finTs}] finalizeRx recId=${lastRecordingId} rxStartAt=${lastRecordingStartAt} rxEndAt=${lastRecordingEndAt} reason=${lastRxEndReason}`,
+      );
+      ctx.log?.info?.(
+        `[digirig] finalizeRx (id=${lastRecordingId}, rxStartAt=${lastRecordingStartAt}, rxEndAt=${lastRecordingEndAt})`,
+      );
+      const chunkText = normalizeSttText(rxBuffer.join(" "));
+      if (!chunkText) {
         rxBuffer = [];
-        rxStartAt = 0;
+        if (rxChunks.length === 0) rxStartAt = 0;
         return;
       }
+
+      if (lastRxEndReason === "maxRecord") {
+        rxChunks.push(chunkText);
+        rxBuffer = [];
+        rxFinalized = true;
+        return;
+      }
+
+      const text = normalizeSttText([...rxChunks, chunkText].join(" "));
+      rxChunks = [];
       if (text === lastRxText && Date.now() - lastRxAt < 15000) {
         ctx.log?.info?.("[digirig] RX dropped (duplicate finalize)");
         const ts = new Date().toISOString();
@@ -284,7 +367,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       const routeEndAt = Date.now();
 
       const policy = config.tx.policy ?? "direct-only";
-      const direct = isDirectCall(text, config.tx.callsign);
+      const parsedAliases = parseAliases(config.tx.aliases);
+      const aliasList = parsedAliases.length ? parsedAliases : inferredAliases;
+      const direct = isDirectCall(text, config.tx.callsign, aliasList);
       const closingRegex = /\b(thanks|thank you|that's it|that\s+is\s+it|73|seven\s+three|clear|goodbye|bye|signing\s+off)\b/i;
       const isClosing = closingRegex.test(text);
       if (policy === "direct-only" && !direct) {
@@ -428,10 +513,16 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
     audioMonitor.on("recording-end", (evt) => {
       lastRxEndAt = Date.now();
+      lastRecordingEndAt = lastRxEndAt;
       const reason = evt?.reason ?? "?";
+      lastRxEndReason = reason;
       const silenceMs = evt?.silenceMs ?? "?";
+      const endTs = new Date().toISOString();
+      void logTrace(
+        `[${endTs}] recording-end recId=${lastRecordingId} durationMs=${evt?.durationMs ?? "?"} silenceMs=${silenceMs} reason=${reason}`,
+      );
       ctx.log?.info?.(
-        `[digirig] RX end (durationMs=${evt?.durationMs ?? "?"}, silenceMs=${silenceMs}, reason=${reason})`,
+        `[digirig] RX end (id=${lastRecordingId}, durationMs=${evt?.durationMs ?? "?"}, silenceMs=${silenceMs}, reason=${reason})`,
       );
       if (streamTimer) {
         clearInterval(streamTimer);
@@ -457,9 +548,11 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         clearTimeout(rxFinalizeTimer);
         rxFinalizeTimer = null;
       }
-      if (!rxBuffer.length) {
+      if (!rxBuffer.length && rxChunks.length === 0) {
         rxStartAt = Date.now();
       }
+      const startTs = new Date().toISOString();
+      void logTrace(`[${startTs}] recording-start recId=${recordingId} sessionId=${rxSessionId}`);
       ctx.log?.info?.("[digirig] STT stream start");
       if (streamTimer) clearInterval(streamTimer);
       streamTimer = setInterval(async () => {
@@ -470,6 +563,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           if (!frames.length) return;
           const pcm = Buffer.concat(frames);
           const wav = pcmToWav(pcm, config.audio.sampleRate, 1);
+          if (!sttStreamLogged) {
+            sttStreamLogged = true;
+            ctx.log?.info?.(`[digirig] STT stream request -> ${config.stt.streamUrl}`);
+          }
           const text = normalizeSttText(
             await runSttStream({ config: config.stt, wavBuffer: wav }),
           );
@@ -497,6 +594,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         let text = latestStreamText;
         if (!text.trim()) {
           try {
+            if (!sttFullLogged) {
+              sttFullLogged = true;
+              ctx.log?.info?.(`[digirig] STT full request -> ${config.stt.streamUrl}`);
+            }
             text = normalizeSttText(
               await runSttStream({
                 config: { ...config.stt, timeoutMs: Math.min(config.stt.timeoutMs, 5000) },
@@ -546,6 +647,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       }
     });
 
+    ctx.log?.info?.(
+      `[digirig] STT server config: command=${config.stt.server.command} args=${config.stt.server.args} modelPath=${config.stt.server.modelPath} host=${config.stt.server.host} port=${config.stt.server.port} streamUrl=${config.stt.streamUrl}`,
+    );
     whisperServer = new WhisperServerManager(
       {
         ...config.stt.server,

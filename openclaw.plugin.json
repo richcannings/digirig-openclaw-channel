@@ -27,6 +27,10 @@
       "label": "TX Callsign",
       "help": "Appended to final responses if not already present."
     },
+    "tx.aliases": {
+      "label": "TX Aliases (comma-separated)",
+      "help": "Names/callsigns that count as direct calls. Leave blank to auto-infer from IDENTITY.md at startup."
+    },
     "rx.energyThreshold": {
       "label": "RX Energy Threshold"
     },
@@ -170,6 +174,9 @@
           },
           "allowToolTx": {
             "type": "boolean"
+          },
+          "aliases": {
+            "type": "string"
           }
         }
       },
