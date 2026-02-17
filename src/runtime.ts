@@ -147,17 +147,12 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     }
   };
 
-  let lastRxText = "";
-  let lastRxAt = 0;
   let rxBuffer: string[] = [];
   let rxStartAt = 0;
   let rxFinalizeTimer: NodeJS.Timeout | null = null;
-  let lastTxText = "";
-  let lastTxAt = 0;
   let rxFinalized = false;
   let rxSessionId = 0;
   let lastRxEndAt = 0;
-  let lastTxStartAt = 0;
   let lastRxEndReason: string | null = null;
   let rxChunks: string[] = [];
   let inferredAliases: string[] = [];
@@ -189,18 +184,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
     outboundQueue = outboundQueue.then(async () => {
       const trimmed = text.trim();
-      // Dedupe TX responses within a short time window.
-      if (trimmed && trimmed === lastTxText && Date.now() - lastTxAt < 30000) {
-        logger?.info?.("[digirig] TX dropped (duplicate)");
-        await logDupe(
-          `[${ts}] kind=tx reason=duplicate windowMs=30000 originalAt=${new Date(lastTxAt).toISOString()} duplicateAt=${ts} original=${JSON.stringify(lastTxText)} duplicate=${JSON.stringify(trimmed)}`,
-        );
-        return;
-      }
-      lastTxText = trimmed;
-      lastTxAt = Date.now();
       await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 60000);
-      lastTxStartAt = Date.now();
       await ptt.withTx(async () => {
         const tts = await synthesizeTts(runtime, text);
         await safeSetCaptureMute(true);
@@ -309,19 +293,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
       const text = normalizeSttText([...rxChunks, chunkText].join(" "));
       rxChunks = [];
-      if (text === lastRxText && Date.now() - lastRxAt < 15000) {
-        ctx.log?.info?.("[digirig] RX dropped (duplicate finalize)");
-        const ts = new Date().toISOString();
-        await logDupe(
-          `[${ts}] kind=rx reason=duplicate-finalize windowMs=15000 originalAt=${new Date(lastRxAt).toISOString()} duplicateAt=${ts} original=${JSON.stringify(lastRxText)} duplicate=${JSON.stringify(text)}`,
-        );
-        rxBuffer = [];
-        rxStartAt = 0;
-        rxFinalized = true;
-        return;
-      }
-      lastRxText = text;
-      lastRxAt = Date.now();
       await logTranscript("RX", text);
       updateStatus({ lastInboundAt: Date.now() });
 
