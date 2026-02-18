@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/digirig",
-  "version": "0.2.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "main": "index.ts",
@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.48",
+    "@types/ws": "^8.18.1",
     "serialport": "^12.0.0",
+    "ws": "^8.19.0",
     "zod": "^4.3.6",
     "zod-to-json-schema": "^3.24.5"
   },
