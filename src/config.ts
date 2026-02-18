@@ -18,18 +18,7 @@ import {
   DEFAULT_TX_CALLSIGN,
   DEFAULT_TX_POLICY,
   DEFAULT_TX_ALIASES,
-  DEFAULT_STT_TIMEOUT_MS,
-  DEFAULT_STT_STREAM_URL,
-  DEFAULT_STT_STREAM_INTERVAL_MS,
-  DEFAULT_STT_STREAM_WINDOW_MS,
   DEFAULT_STT_WS_URL,
-  DEFAULT_STT_SERVER_AUTOSTART,
-  DEFAULT_STT_SERVER_COMMAND,
-  DEFAULT_STT_SERVER_ARGS,
-  DEFAULT_STT_SERVER_MODEL_PATH,
-  DEFAULT_STT_SERVER_HOST,
-  DEFAULT_STT_SERVER_PORT,
-  DEFAULT_STT_SERVER_RESTART_MS,
 } from "./defaults.js";
 
 const DigirigAudioSchema = z
@@ -67,33 +56,8 @@ const DigirigRxSchema = z
   })
   .default({});
 
-const DigirigSttServerSchema = z
-  .object({
-    autoStart: z.boolean().default(DEFAULT_STT_SERVER_AUTOSTART),
-    command: z.string().min(1).default(DEFAULT_STT_SERVER_COMMAND),
-    args: z.string().default(DEFAULT_STT_SERVER_ARGS),
-    modelPath: z.string().default(DEFAULT_STT_SERVER_MODEL_PATH),
-    host: z.string().default(DEFAULT_STT_SERVER_HOST),
-    port: z.number().int().min(1).default(DEFAULT_STT_SERVER_PORT),
-    restartMs: z.number().int().min(0).default(DEFAULT_STT_SERVER_RESTART_MS),
-  })
-  .default({});
-
 const DigirigSttSchema = z.object({
-  timeoutMs: z.number().int().min(1000).default(DEFAULT_STT_TIMEOUT_MS),
-  streamUrl: z.string().url().default(DEFAULT_STT_STREAM_URL),
-  streamIntervalMs: z
-    .number()
-    .int()
-    .min(100)
-    .default(DEFAULT_STT_STREAM_INTERVAL_MS),
-  streamWindowMs: z
-    .number()
-    .int()
-    .min(500)
-    .default(DEFAULT_STT_STREAM_WINDOW_MS),
-  wsUrl: z.string().default(DEFAULT_STT_WS_URL),
-  server: z.preprocess((val) => val ?? {}, DigirigSttServerSchema),
+  wsUrl: z.string().min(1).default(DEFAULT_STT_WS_URL),
 });
 
 const DigirigTxSchema = z

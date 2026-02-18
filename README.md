@@ -37,60 +37,23 @@ openclaw config set channels.digirig.ptt.device "/dev/ttyUSB0"
 openclaw config set channels.digirig.ptt.rts true
 ```
 
-### STT (streaming via whisper-server)
-Streaming STT reduces latency by sending rolling audio windows to a local `whisper-server` (required).
+### STT (WhisperLive WebSocket)
+Streaming STT uses the collabora/WhisperLive server over WebSocket.
 
-1) Build whisper.cpp
+1) Run WhisperLive (example)
 ```bash
-# Clone once (example path)
-git clone https://github.com/ggerganov/whisper.cpp ~/src/whisper.cpp
-
-# Ensure helper scripts are executable
-chmod +x /path/to/digirig/scripts/whisper-*.sh
-
-# CPU build
-cd ~/src/whisper.cpp
-bash /path/to/digirig/scripts/whisper-build.sh cpu ~/src/whisper.cpp
+# inside your WhisperLive venv
+python3 /path/to/whisperlive/run_server.py --port 28080 --backend faster_whisper   -fw Systran/faster-whisper-medium.en -c /path/to/models/whisper
 ```
 
-**CUDA build (GPU acceleration)**
+2) Point DigiRig at the WS endpoint
 ```bash
-# Install CUDA toolkit (Debian/Ubuntu)
-sudo apt-get update
-sudo apt-get install -y nvidia-cuda-toolkit
-
-# Build with CUDA
-bash /path/to/digirig/scripts/whisper-build.sh cuda ~/src/whisper.cpp
-```
-
-2) Download a model
-```bash
-cd ~/src/whisper.cpp
-bash ./models/download-ggml-model.sh medium.en
-```
-
-3) Configure OpenClaw to auto-start whisper-server
-```bash
-openclaw config set channels.digirig.stt.server.modelPath "/path/to/whisper.cpp/models/ggml-medium.en.bin"
-openclaw config set channels.digirig.stt.server.command "whisper-server"
-openclaw config set channels.digirig.stt.server.args -- "-m {model} --host {host} --port {port}"
-```
-
-4) Configure OpenClaw streaming endpoint + tuning
-```bash
-openclaw config set channels.digirig.stt.streamUrl "http://127.0.0.1:18080/inference"
-# Optional tuning:
-openclaw config set channels.digirig.stt.streamIntervalMs 1000
-openclaw config set channels.digirig.stt.streamWindowMs 4000
+openclaw config set channels.digirig.stt.wsUrl "ws://127.0.0.1:28080"
 ```
 
 **Notes**
-- GPU build requires NVIDIA drivers + CUDA toolkit installed.
-- whisper-server auto-starts when DigiRig starts (if modelPath is set).
-- You can still run the server manually:
-```bash
-bash /path/to/digirig/scripts/whisper-server.sh ~/src/whisper.cpp ~/src/whisper.cpp/models/ggml-medium.en.bin 127.0.0.1 18080
-```
+- WS STT is the only supported STT mode.
+- Ensure the WhisperLive server is running before starting DigiRig.
 
 ### TX callsign
 ```bash
