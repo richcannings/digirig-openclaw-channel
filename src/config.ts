@@ -22,6 +22,7 @@ import {
   DEFAULT_STT_STREAM_URL,
   DEFAULT_STT_STREAM_INTERVAL_MS,
   DEFAULT_STT_STREAM_WINDOW_MS,
+  DEFAULT_STT_WS_URL,
   DEFAULT_STT_SERVER_AUTOSTART,
   DEFAULT_STT_SERVER_COMMAND,
   DEFAULT_STT_SERVER_ARGS,
@@ -91,6 +92,7 @@ const DigirigSttSchema = z.object({
     .int()
     .min(500)
     .default(DEFAULT_STT_STREAM_WINDOW_MS),
+  wsUrl: z.string().default(DEFAULT_STT_WS_URL),
   server: z.preprocess((val) => val ?? {}, DigirigSttServerSchema),
 });
 

@@ -9,7 +9,7 @@ export const DEFAULT_RX_ENERGY_THRESHOLD = 0.002;
 export const DEFAULT_RX_FRAME_MS = 20;
 export const DEFAULT_RX_PRE_ROLL_MS = 100;
 export const DEFAULT_RX_MIN_SPEECH_MS = 200;
-export const DEFAULT_RX_MAX_SILENCE_MS = 3000;
+export const DEFAULT_RX_MAX_SILENCE_MS = 1500;
 export const DEFAULT_RX_MAX_RECORD_MS = 10000;
 export const DEFAULT_RX_BUSY_HOLD_MS = 1000;
 export const DEFAULT_RX_START_COOLDOWN_MS = 3000;
@@ -22,6 +22,7 @@ export const DEFAULT_STT_TIMEOUT_MS = 15000;
 export const DEFAULT_STT_STREAM_URL = "http://127.0.0.1:18080/inference";
 export const DEFAULT_STT_STREAM_INTERVAL_MS = 1200;
 export const DEFAULT_STT_STREAM_WINDOW_MS = 30000;
+export const DEFAULT_STT_WS_URL = "";
 
 export const DEFAULT_STT_SERVER_AUTOSTART = true;
 export const DEFAULT_STT_SERVER_COMMAND = "whisper-server";

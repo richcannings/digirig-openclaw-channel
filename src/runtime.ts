@@ -8,6 +8,7 @@ import type { DigirigConfig } from "./config.js";
 import { AudioMonitor } from "./audio-monitor.js";
 import { PttController } from "./ptt.js";
 import { runSttStream } from "./stt.js";
+import { WhisperLiveClient } from "./stt-ws.js";
 import { pcmToWav } from "./wav.js";
 import { playPcm, synthesizeTts } from "./tts.js";
 import { WhisperServerManager } from "./whisper-server.js";
@@ -255,7 +256,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     let streamInFlight = false;
     let sttInFlight = false;
     let latestStreamText = "";
-    const streamEnabled = true;
+    let wsClient: WhisperLiveClient | null = null;
+    const useWsStt = Boolean(config.stt.wsUrl && config.stt.wsUrl.trim());
+    const streamEnabled = !useWsStt;
     const frameBytes = Math.floor(
       (config.audio.sampleRate * 1 * 2 * config.rx.frameMs) / 1000,
     );
@@ -515,6 +518,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         clearInterval(streamTimer);
         streamTimer = null;
       }
+      if (useWsStt && wsClient) {
+        wsClient.end();
+      }
       if (reason === "maxRecord") {
         void finalizeRx();
         return;
@@ -527,6 +533,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       recordingFrames.push(frame);
       if (recordingFrames.length > streamWindowFrames * 4) {
         recordingFrames = recordingFrames.slice(-streamWindowFrames * 2);
+      }
+      if (useWsStt && wsClient) {
+        wsClient.sendAudio(frame);
       }
     });
 
@@ -542,6 +551,23 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       }
       if (!rxBuffer.length && rxChunks.length === 0) {
         rxStartAt = Date.now();
+      }
+      if (useWsStt && !wsClient) {
+        wsClient = new WhisperLiveClient(
+          {
+            url: config.stt.wsUrl.trim(),
+            model: "Systran/faster-whisper-medium.en",
+            task: "transcribe",
+            useVad: false,
+          },
+          ctx.log,
+        );
+        void wsClient.connect().catch((err) =>
+          ctx.log?.error?.(`[digirig] WhisperLive connect failed: ${String(err)}`),
+        );
+      }
+      if (useWsStt && wsClient) {
+        wsClient.reset();
       }
       if (streamEnabled) {
         ctx.log?.info?.("[digirig] STT stream start");
@@ -588,6 +614,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           `[digirig] STT start (rxToSttStartMs=${sttStartAt - rxEndAt})`,
         );
         let text = latestStreamText;
+        if (useWsStt && wsClient) {
+          await wsClient.waitForIdle(200);
+          text = normalizeSttText(wsClient.getText() || "");
+        }
         const needsFullStt = !text.trim() || text.trim().length < 24;
         ctx.log?.info?.(`[digirig] STT decision session=${rxSessionId} latestLen=${text?.length ?? 0} needsFullStt=${needsFullStt}`);
         if (needsFullStt) {
@@ -600,7 +630,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           } catch (err) {
             ctx.log?.error?.(`[digirig] STT stream failed: ${String(err)}`);
           }
-        } else {
+        } else if (!useWsStt) {
           runSttStream({
             config: { ...config.stt, timeoutMs: Math.min(config.stt.timeoutMs, 5000) },
             wavBuffer: wav,
@@ -684,6 +714,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   const stop = async () => {
     stopped = true;
     audioMonitor.stop();
+    wsClient?.close();
     await whisperServer?.stop();
     await ptt.close();
   };
