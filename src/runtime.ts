@@ -541,10 +541,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           },
           ctx.log,
         );
-        void wsClient.connect().catch((err) =>
-          ctx.log?.error?.(`[digirig] WhisperLive connect failed: ${String(err)}`),
-        );
       }
+      void wsClient.connect().catch((err) =>
+        ctx.log?.error?.(`[digirig] WhisperLive connect failed: ${String(err)}`),
+      );
       wsClient.reset();
     });
 
