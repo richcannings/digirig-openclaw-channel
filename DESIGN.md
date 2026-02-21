@@ -19,9 +19,9 @@ This channel provides a voice interaction surface comparable in richness to a Wh
 ## 2. Goals
 
 - **Bidirectional voice interface**: RX (receive) audio → speech-to-text → OpenClaw agent response → text-to-speech → TX (transmit) audio.
-- **Low-latency interaction**: Streaming STT via WhisperLive WebSocket for fast turnarounds.
-- **Operational safety**: Enforce policy constraints on when the system may transmit.
+- **Low-latency interaction**: Designed for speedy responses including streaming STT via WhisperLive WebSocket.
 - **Simple local deployment**: Uses local audio devices and a DigiRig (or similar) audio/PTT interface.
+- **Turnkey installation**: With OpenClaw's help, it will build the Whisper Live server and pull the required models.
 - **Traceability**: Logs RX/TX transcripts and latency metrics.
 
 ---
@@ -29,7 +29,7 @@ This channel provides a voice interaction surface comparable in richness to a Wh
 ## 3. Non-Goals
 
 - Support for media attachments or rich cards.
-- Multi-party chat threading.
+- Multi-party chat threading. (not yet)
 - Cloud-hosted STT/TTS services (local by default).
 
 ---
@@ -39,7 +39,7 @@ This channel provides a voice interaction surface comparable in richness to a Wh
 **External dependencies:**
 - **DigiRig or equivalent**: audio interface + PTT control via serial.
 - **ALSA** tools: `arecord` and `aplay` for raw audio capture and playback.
-- **WhisperLive** (local): WebSocket STT server (collabora/WhisperLive).
+- **WhisperLive** (local): WebSocket STT server (collabora/WhisperLive). Note that OpenClaw will download, compile and set up Whisper Live on your behalf.
 - **OpenClaw runtime**: routing, session recording, TTS, and agent dispatch.
 
 ---
@@ -94,7 +94,7 @@ This channel provides a voice interaction surface comparable in richness to a Wh
 **AudioMonitor behavior**
 - Captures frames of PCM at configured `frameMs`.
 - Computes RMS energy per frame.
-- Starts recording on threshold exceedance (with a short start cooldown to avoid tail retriggers).
+- Starts recording on threshold exceedance (with `startCooldownMs` to avoid tail retriggers).
 - Stops recording after `maxSilenceMs` or `maxRecordMs`.
 - Emits:
   - `recording-start`
@@ -129,13 +129,13 @@ This channel provides a voice interaction surface comparable in richness to a Wh
 - `proactive`: allow responses without explicit direct call.
 
 **Alias inference**
-- If `tx.aliases` empty, attempts to infer from `IDENTITY.md`.
+- If the list of names of your OpenClaw instance is empty (`tx.aliases`), attempts to infer from `IDENTITY.md`.
 
 ### 6.5 TX Pipeline
 
 - Uses outbound queue to serialize transmissions.
-- Optional capture mute (ALSA `amixer`) while transmitting.
-- Mutes RX during TX to prevent self‑triggered sessions.
+- Optional capture mute (ALSA `amixer`) while transmitting (input‑device based).
+- Mutes RX during TX (AudioMonitor `muteFor`) to prevent self‑triggered sessions.
 - PTT lead/tail timing to avoid clipping.
 
 ### 6.6 Reply Formatting
@@ -158,7 +158,8 @@ Key settings (see `openclaw.plugin.json`):
 - **PTT**
   - `ptt.device`, `ptt.rts`, `ptt.leadMs`, `ptt.tailMs`
 - **RX**
-  - `rx.energyThreshold`, `rx.minSpeechMs`, `rx.maxSilenceMs`, `rx.maxRecordMs`
+  - `rx.energyThreshold`, `rx.energyLogIntervalMs`, `rx.frameMs`, `rx.preRollMs`
+  - `rx.minSpeechMs`, `rx.maxSilenceMs`, `rx.maxRecordMs`, `rx.busyHoldMs`, `rx.startCooldownMs`
 - **STT**
   - `stt.wsUrl` (WhisperLive WebSocket endpoint)
 - **TX**

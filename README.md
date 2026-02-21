@@ -1,8 +1,29 @@
-# DigiRig Channel for OpenClaw.
+# DigiRig Channel for OpenClaw
 
-Talk to OpenClaw over ham radio. 
+Talk to OpenClaw over ham radio. This plugin bridges RF audio into OpenClaw with streaming WhisperLive STT, policy‑aware routing, and PTT‑controlled TX.
 
-This plugin provides local ham radio RX/TX using VOX or PTT via a digirig.
+## Overview
+The DigiRig Voice Channel bridges ham radio voice interactions into the OpenClaw conversational system. Radio operators speak over RF, speech is transcribed to text, routed through OpenClaw’s agent system, and spoken replies are transmitted back over the radio. It provides a voice interaction surface comparable in richness to a chat channel, with structured routing, context handling, command processing, and policy‑aware TX.
+
+## Goals
+- **Bidirectional voice interface**: RX → STT → agent response → TTS → TX
+- **Low‑latency interaction**: streaming STT via WhisperLive WebSocket
+- **Simple local deployment**: local audio + DigiRig/PTT
+- **Turnkey installation**: OpenClaw provisions WhisperLive and required models
+- **Traceability**: transcript logs + timing metrics
+
+## Non‑Goals
+- Media attachments or rich cards
+- Multi‑party chat threading (not yet)
+- Cloud‑hosted STT/TTS services (local by default)
+
+## Highlights
+- **Streaming STT (WhisperLive WS)** for low‑latency replies
+- **PTT‑controlled TX** with lead/tail timing and RX mute during TX
+- **Policy gating** (`direct-only`, `value-and-wait`, `proactive`)
+- **RX tuning** (energy threshold, silence, cooldowns)
+- **Daily transcript logs** in `~/.openclaw/logs/`
+- **Simplex/half‑duplex** behavior (no RX during TX)
 
 ## Install from source
 ```bash
@@ -18,9 +39,10 @@ openclaw plugins install -l ~/src/digirig-openclaw-channel
 openclaw gateway restart
 ```
 
-## Configure
+> **WhisperLive install:** the plugin setup provisions WhisperLive for you. You can override the WS URL if you already run a WhisperLive server.
 
-Configuration is possible through the web ui, command line, and of course by talking with openclaw. Here are the commmand line settings.
+## Configure
+Configuration is possible through the web UI, CLI, or by voice. Common settings:
 
 ### Audio devices
 ```bash
@@ -31,36 +53,43 @@ openclaw config set channels.digirig.audio.outputDevice "plughw:0,0"
 ```
 
 ### PTT
-This can also be used for testing so that openclaw does not transmit.
 ```bash
 openclaw config set channels.digirig.ptt.device "/dev/ttyUSB0"
-openclaw config set channels.digirig.ptt.rts true
 ```
 
 ### STT (WhisperLive WebSocket)
-Streaming STT uses the collabora/WhisperLive server over WebSocket.
-
-1) Run WhisperLive (example)
-```bash
-# inside your WhisperLive venv
-python3 /path/to/whisperlive/run_server.py --port 28080 --backend faster_whisper   -fw Systran/faster-whisper-medium.en -c /path/to/models/whisper
-```
-
-2) Point DigiRig at the WS endpoint
 ```bash
 openclaw config set channels.digirig.stt.wsUrl "ws://127.0.0.1:28080"
 ```
 
-**Notes**
-- WS STT is the only supported STT mode.
-- Ensure the WhisperLive server is running before starting DigiRig.
-
-### TX callsign
+### TX callsign + policy
 ```bash
 openclaw config set channels.digirig.tx.callsign "W6RGC/AI"
+openclaw config set channels.digirig.tx.policy "direct-only"   # direct-only | value-and-wait | proactive
+openclaw config set channels.digirig.tx.aliases "Overlord,Seven,7"
 ```
 
-### TX disable (RX-only)
+### TX disable (RX‑only)
 ```bash
 openclaw config set channels.digirig.ptt.rts false
 ```
+
+### RX tuning
+If transmissions are truncated or missed, tune RX thresholds:
+```bash
+openclaw config set channels.digirig.rx.energyThreshold 0.0015
+openclaw config set channels.digirig.rx.minSpeechMs 200
+openclaw config set channels.digirig.rx.maxSilenceMs 900
+openclaw config set channels.digirig.rx.maxRecordMs 60000
+openclaw config set channels.digirig.rx.busyHoldMs 1500
+openclaw config set channels.digirig.rx.startCooldownMs 500
+```
+
+## Logs
+Daily transcripts are written to:
+```
+~/.openclaw/logs/digirig-YYYY-MM-DD.log
+```
+
+## Simplex behavior
+This channel is **half‑duplex**: when TX is keyed, RX is muted/ignored. Overlapping speech during TX will not be transcribed.
