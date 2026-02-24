@@ -138,28 +138,50 @@ export default function register(api: {
     // @ts-expect-error plugin api shape is provided by OpenClaw at runtime
     api.registerCommand({
         name: "digirig",
-        description: "DigiRig commands (tx)",
+        description: "DigiRig commands (tx, calibrate)",
         acceptsArgs: true,
         requireAuth: false,
         handler: async (ctx: { args?: string }) => {
             const raw = (ctx.args ?? "").trim();
             if (!raw) {
-                return { text: "Usage: /digirig tx <text>" };
+                return { text: "Usage: /digirig tx <text> | /digirig calibrate" };
             }
             const [cmd, ...rest] = raw.split(/\s+/);
-            if (cmd.toLowerCase() !== "tx") {
-                return { text: "Usage: /digirig tx <text>" };
+            const sub = cmd.toLowerCase();
+            if (sub === "tx") {
+                const text = rest.join(" ").trim();
+                if (!text) {
+                    return { text: "Usage: /digirig tx <text>" };
+                }
+                const runtime = getRuntime();
+                const cfg = getDigirigRuntime().config.loadConfig();
+                const callsign =
+                    cfg.channels?.digirig?.tx?.callsign ?? DEFAULT_TX_CALLSIGN;
+                await runtime.speak(appendCallsign(text, callsign));
+                return { text: "✅ Transmitted via DigiRig" };
             }
-            const text = rest.join(" ").trim();
-            if (!text) {
-                return { text: "Usage: /digirig tx <text>" };
+            if (sub === "calibrate") {
+                const runtime = getRuntime();
+                try {
+                    const summary = await runtime.calibrateRx();
+                    const formatDb = (value: number) =>
+                        Number.isFinite(value) ? value.toFixed(1) : "-∞";
+                    const lines = [
+                        `✅ RX calibration complete. Applied ALSA capture level: ${summary.appliedLevel}%.`,
+                        "Samples:",
+                        ...summary.samples.map((sample) =>
+                            `- ${sample.level}%: peak ${formatDb(sample.peakDb)} dBFS, ` +
+                            `RMS ${formatDb(sample.rmsDb)} dBFS, ` +
+                            `${sample.clipped ? "clipped" : "no clip"}`,
+                        ),
+                        "Tip: If results look off, re-run /digirig calibrate and transmit clearly for 10–15s each step.",
+                    ];
+                    return { text: lines.join("\n") };
+                } catch (err) {
+                    return { text: `❌ RX calibration failed: ${String(err)}` };
+                }
             }
-            const runtime = getRuntime();
-            const cfg = getDigirigRuntime().config.loadConfig();
-            const callsign =
-                cfg.channels?.digirig?.tx?.callsign ?? DEFAULT_TX_CALLSIGN;
-            await runtime.speak(appendCallsign(text, callsign));
-            return { text: "✅ Transmitted via DigiRig" };
+            return { text: "Usage: /digirig tx <text> | /digirig calibrate" };
         },
     });
 

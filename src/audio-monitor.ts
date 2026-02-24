@@ -121,6 +121,7 @@ export class AudioMonitor extends EventEmitter {
       const frame = chunk.subarray(offset, offset + frameBytes);
       const energy = computeRms(frame);
       this.emit("energy", energy);
+      this.emit("frame", frame);
       if (this.config.energyLogIntervalMs > 0) {
         this.energyLogSamples += 1;
         this.energyLogSum += energy;

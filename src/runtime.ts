@@ -5,10 +5,12 @@ import { join } from "node:path";
 import { createReplyPrefixOptions, type ChannelGatewayStartContext } from "openclaw/plugin-sdk";
 import { getDigirigRuntime } from "./state.js";
 import type { DigirigConfig } from "./config.js";
-import { AudioMonitor } from "./audio-monitor.js";
+import { AudioMonitor, computeRms } from "./audio-monitor.js";
 import { PttController } from "./ptt.js";
 import { WhisperLiveClient } from "./stt-ws.js";
 import { playPcm, synthesizeTts } from "./tts.js";
+import { formatAudioMetrics, type AudioMetricSummary } from "./shared/metrics.js";
+import { formatRadioReply, isDirectCall, normalizeSttText, parseAliases } from "./shared/text.js";
 
 export function appendCallsign(text: string, callsign?: string): string {
   const trimmed = text.trim();
@@ -24,62 +26,6 @@ export function appendCallsign(text: string, callsign?: string): string {
   return `${trimmed} ${callsign}`;
 }
 
-function parseAliases(input?: string): string[] {
-  if (!input) return [];
-  return input
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-}
-
-function isDirectCall(text: string, callsign?: string, aliases: string[] = []): boolean {
-  const upper = text.toUpperCase();
-  const needles = [callsign, ...aliases].filter(Boolean) as string[];
-  if (!needles.length) return false;
-  const textBare = upper.replace(/[^A-Z0-9]/g, "");
-  return needles.some((needle) => {
-    const call = needle.toUpperCase();
-    if (upper.includes(call)) return true;
-    const callBare = call.replace(/[^A-Z0-9]/g, "");
-    return callBare.length > 0 && textBare.includes(callBare);
-  });
-}
-
-
-export type DigirigRuntime = {
-  start: (ctx: ChannelGatewayStartContext<DigirigConfig>) => Promise<{ stop: () => void }>;
-  stop: () => Promise<void>;
-  speak: (text: string) => Promise<void>;
-};
-
-function formatRadioReply(text: string, maxChars = 140): string {
-  const trimmed = text.trim().replace(/\s+/g, " ");
-  if (!trimmed) {
-    return "";
-  }
-  const sentenceMatch = trimmed.match(/^(.+?[\.!\?])(\s|$)/);
-  const base = sentenceMatch ? sentenceMatch[1] : trimmed;
-  return base.slice(0, maxChars).trim();
-}
-
-function normalizeSttText(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed) return "";
-  const lower = trimmed.toLowerCase();
-  if (lower === "[blank_audio]" || lower === "(blank audio)") return "";
-  if (/\bbeep\b/i.test(trimmed)) return "";
-  if (/^\s*[\[(].*[\])]\s*$/.test(trimmed)) return "";
-
-  // Drop stray 1–3 character prefix fragments (e.g., "GC.") when followed by a sentence.
-  const tokens = trimmed.split(/\s+/);
-  if (tokens.length > 1 && tokens[0].length <= 3) {
-    const remainder = tokens.slice(1).join(" ");
-    if (remainder.length >= 12) {
-      return remainder.trim();
-    }
-  }
-  return trimmed;
-}
 
 export async function createDigirigRuntime(config: DigirigConfig): Promise<DigirigRuntime> {
   const runtime = getDigirigRuntime();
@@ -155,6 +101,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let lastRxEndReason: string | null = null;
   let rxChunks: string[] = [];
   let inferredAliases: string[] = [];
+  let lastRxMetrics: AudioMetricSummary | null = null;
 
   const logTranscript = async (speaker: "RX" | "TX", text: string) => {
     if (!text.trim()) return;
@@ -212,6 +159,18 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       return { stop: () => {} };
     }
     logger = ctx.log ?? null;
+
+    const captureCard = parseAlsaCard(config.audio.inputDevice);
+    if (captureCard !== null) {
+      try {
+        await setCaptureLevel(
+          { card: captureCard, control: config.audio.captureControl || "Mic" },
+          config.audio.captureLevel,
+        );
+      } catch (err) {
+        ctx.log?.warn?.(`[digirig] failed to apply capture level: ${String(err)}`);
+      }
+    }
 
     const updateStatus = (patch: Partial<{
       running: boolean;
@@ -486,11 +445,15 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       if (responseTimeMs !== null) {
         const metricTs = new Date().toISOString();
         ctx.log?.info?.(`[digirig] responseTimeMs=${responseTimeMs}`);
-        await appendTranscript(`[${metricTs}] METRIC: responseTimeMs=${responseTimeMs}`);
+        const audioMetric = formatAudioMetrics(lastRxMetrics);
+        await appendTranscript(
+          `[${metricTs}] METRIC: responseTimeMs=${responseTimeMs}${audioMetric}`,
+        );
       }
       rxBuffer = [];
       rxStartAt = 0;
       rxFinalized = true;
+      lastRxMetrics = null;
     };
 
     audioMonitor.on("recording-end", (evt) => {
@@ -548,10 +511,17 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       wsClient.reset();
     });
 
-    audioMonitor.on("utterance", async (_utterance) => {
+    audioMonitor.on("utterance", async (utterance) => {
       if (rxFinalized) {
         return;
       }
+      const rms = computeRms(utterance.pcm);
+      const peak = computePeak(utterance.pcm);
+      lastRxMetrics = {
+        rmsDb: toDbfs(rms),
+        peakDb: toDbfs(peak),
+        clipped: peak >= 0.99,
+      };
       if (!wsClient) {
         ctx.log?.warn?.("[digirig] STT skipped: WS client not ready");
         return;
@@ -567,10 +537,12 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         const text = normalizeSttText(wsClient.getText() || "");
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
         if (!text.trim()) {
+          wsClient.reset();
           return;
         }
         const normalizedRx = normalizeSttText(text);
         if (!normalizedRx) {
+          wsClient.reset();
           return;
         }
 
@@ -585,6 +557,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         }
 
         rxBuffer.push(normalizedRx);
+        wsClient.reset();
         return;
       } catch (err) {
         ctx.log?.error?.(`[digirig] inbound error: ${String(err)}`);
@@ -615,6 +588,121 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     };
   };
 
+  const calibrateRx = async (opts: Partial<CalibrationOptions> = {}): Promise<CalibrationSummary> => {
+    if (stopped) {
+      throw new Error("DigiRig runtime is not running");
+    }
+
+    const calibration: CalibrationOptions = {
+      minLevel: 20,
+      maxLevel: 90,
+      maxSteps: 3,
+      targetPeakDbMin: -9,
+      targetPeakDbMax: -3,
+      targetRmsDbMin: -24,
+      targetRmsDbMax: -12,
+      sampleTimeoutMs: 20000,
+      sampleWindowMs: 10000,
+      settleMs: 400,
+      ...opts,
+    };
+
+    const control = config.audio.captureControl || "Mic";
+    const card = parseAlsaCard(config.audio.inputDevice);
+    if (card === null) {
+      throw new Error(`Unable to resolve ALSA card from ${config.audio.inputDevice}`);
+    }
+
+    const levels: CalibrationSample[] = [];
+    let low = calibration.minLevel;
+    let high = calibration.maxLevel;
+    let best: CalibrationSample | null = null;
+
+    const scoreSample = (sample: CalibrationSample) => {
+      if (sample.clipped) return -1000;
+      const peakScore = -Math.abs(sample.peakDb - -6) * 2;
+      const rmsScore = -Math.abs(sample.rmsDb - -18);
+      return peakScore + rmsScore;
+    };
+
+    const isGood = (sample: CalibrationSample) => {
+      if (sample.clipped) return false;
+      if (sample.peakDb < calibration.targetPeakDbMin || sample.peakDb > calibration.targetPeakDbMax) {
+        return false;
+      }
+      if (sample.rmsDb < calibration.targetRmsDbMin || sample.rmsDb > calibration.targetRmsDbMax) {
+        return false;
+      }
+      return true;
+    };
+
+    const captureSample = async (level: number): Promise<CalibrationSample> => {
+      await setCaptureLevel({ card, control }, level);
+      await delay(calibration.settleMs);
+      return await captureWindowSample(
+        audioMonitor,
+        level,
+        calibration.sampleWindowMs,
+        calibration.sampleTimeoutMs,
+      );
+    };
+
+    for (let step = 0; step < calibration.maxSteps; step += 1) {
+      if (low > high) break;
+      const level = Math.round((low + high) / 2);
+      const sample = await captureSample(level);
+      levels.push(sample);
+
+      if (!best || scoreSample(sample) > scoreSample(best)) {
+        best = sample;
+      }
+
+      if (isGood(sample)) {
+        best = sample;
+        break;
+      }
+
+      if (sample.clipped || sample.peakDb > calibration.targetPeakDbMax) {
+        high = level - 1;
+      } else if (sample.rmsDb < calibration.targetRmsDbMin || sample.peakDb < calibration.targetPeakDbMin) {
+        low = level + 1;
+      } else {
+        break;
+      }
+    }
+
+    if (!best) {
+      throw new Error("Calibration failed to capture audio.");
+    }
+
+    await setCaptureLevel({ card, control }, best.level);
+
+    const runtime = getDigirigRuntime();
+    const cfg = runtime.config.loadConfig();
+    const digirig = (cfg.channels?.digirig ?? {}) as DigirigConfig;
+    const nextCfg = {
+      ...cfg,
+      channels: {
+        ...cfg.channels,
+        digirig: {
+          ...digirig,
+          audio: {
+            ...digirig.audio,
+            captureControl: control,
+            captureLevel: best.level,
+          },
+        },
+      },
+    };
+    await runtime.config.writeConfigFile(nextCfg);
+
+    return {
+      appliedLevel: best.level,
+      samples: levels,
+      bestSample: best,
+    };
+  };
+
   const stop = async () => {
     stopped = true;
     audioMonitor.stop();
@@ -622,10 +710,82 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     await ptt.close();
   };
 
-  return { start, stop, speak };
+  return { start, stop, speak, calibrateRx };
+}
+
+function computePeak(frame: Buffer): number {
+  if (frame.length < 2) {
+    return 0;
+  }
+  let max = 0;
+  for (let i = 0; i < frame.length; i += 2) {
+    const sample = Math.abs(frame.readInt16LE(i)) / 32768;
+    if (sample > max) max = sample;
+  }
+  return max;
+}
+
+function toDbfs(value: number): number {
+  if (value <= 0) return -Infinity;
+  return 20 * Math.log10(value);
+}
+
+async function captureWindowSample(
+  monitor: AudioMonitor,
+  level: number,
+  windowMs: number,
+  timeoutMs: number,
+): Promise<CalibrationSample> {
+  return await new Promise<CalibrationSample>((resolve, reject) => {
+    let sumSquares = 0;
+    let sampleCount = 0;
+    let peak = 0;
+    const startAt = Date.now();
+
+    const stop = () => {
+      monitor.removeListener("frame", handler);
+    };
+
+    const finish = () => {
+      stop();
+      const rms = sampleCount > 0 ? Math.sqrt(sumSquares / sampleCount) : 0;
+      const rmsDb = toDbfs(rms);
+      const peakDb = toDbfs(peak);
+      const clipped = peak >= 0.99;
+      const durationMs = Date.now() - startAt;
+      resolve({ level, rms, peak, rmsDb, peakDb, clipped, durationMs });
+    };
+
+    const timeout = setTimeout(() => {
+      stop();
+      reject(new Error("Calibration timed out waiting for RX audio"));
+    }, Math.max(1000, timeoutMs));
+
+    const windowTimer = setTimeout(() => {
+      clearTimeout(timeout);
+      finish();
+    }, Math.max(1000, windowMs));
+
+    const handler = (frame: Buffer) => {
+      for (let i = 0; i < frame.length; i += 2) {
+        const sample = frame.readInt16LE(i) / 32768;
+        const abs = Math.abs(sample);
+        if (abs > peak) peak = abs;
+        sumSquares += sample * sample;
+        sampleCount += 1;
+      }
+    };
+
+    monitor.on("frame", handler);
+  });
 }
 
 type CaptureMuteConfig = {
+  card: number;
+  control: string;
+};
+
+type CaptureLevelConfig = {
   card: number;
   control: string;
 };
@@ -645,6 +805,12 @@ function getCaptureMuteConfig(device: string): CaptureMuteConfig | null {
 
 async function setCaptureMute(cfg: CaptureMuteConfig, muted: boolean): Promise<void> {
   const args = ["-c", String(cfg.card), "set", cfg.control, muted ? "nocap" : "cap"];
+  await runCommand("amixer", args);
+}
+
+async function setCaptureLevel(cfg: CaptureLevelConfig, level: number): Promise<void> {
+  const clamped = Math.max(0, Math.min(100, Math.round(level)));
+  const args = ["-c", String(cfg.card), "set", cfg.control, `${clamped}%`, "cap"];
   await runCommand("amixer", args);
 }
 

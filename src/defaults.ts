@@ -1,5 +1,7 @@
 export const DEFAULT_AUDIO_DEVICE = "plughw:0,0";
 export const DEFAULT_AUDIO_SAMPLE_RATE = 16000;
+export const DEFAULT_AUDIO_CAPTURE_CONTROL = "Mic";
+export const DEFAULT_AUDIO_CAPTURE_LEVEL = 60;
 
 export const DEFAULT_PTT_DEVICE = "/dev/ttyUSB0";
 export const DEFAULT_PTT_LEAD_MS = 350;

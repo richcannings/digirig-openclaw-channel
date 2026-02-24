@@ -85,6 +85,16 @@ openclaw config set channels.digirig.rx.busyHoldMs 1500
 openclaw config set channels.digirig.rx.startCooldownMs 500
 ```
 
+### RX calibration (ALSA capture level)
+Run a minimal-transmission calibration that adjusts ALSA capture level only:
+```bash
+/digirig calibrate
+```
+Notes:
+- Start transmitting immediately after you run the command.
+- Speak clearly for ~10–15s per step (2–3 steps total).
+- The command picks a “good enough” level and saves it to config.
+
 ## Logs
 Daily transcripts are written to:
 ```

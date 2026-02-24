@@ -10,6 +10,13 @@
     "audio.outputDevice": {
       "placeholder": "plughw:0,0"
     },
+    "audio.captureControl": {
+      "label": "ALSA Capture Control",
+      "placeholder": "Mic"
+    },
+    "audio.captureLevel": {
+      "label": "ALSA Capture Level (%)"
+    },
     "ptt": {
       "label": "PTT"
     },

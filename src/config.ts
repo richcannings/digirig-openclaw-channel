@@ -19,6 +19,8 @@ import {
   DEFAULT_TX_POLICY,
   DEFAULT_TX_ALIASES,
   DEFAULT_STT_WS_URL,
+  DEFAULT_AUDIO_CAPTURE_CONTROL,
+  DEFAULT_AUDIO_CAPTURE_LEVEL,
 } from "./defaults.js";
 
 const DigirigAudioSchema = z
@@ -26,6 +28,8 @@ const DigirigAudioSchema = z
     inputDevice: z.string().default(DEFAULT_AUDIO_DEVICE),
     outputDevice: z.string().default(DEFAULT_AUDIO_DEVICE),
     sampleRate: z.number().int().positive().default(DEFAULT_AUDIO_SAMPLE_RATE),
+    captureControl: z.string().default(DEFAULT_AUDIO_CAPTURE_CONTROL),
+    captureLevel: z.number().int().min(0).max(100).default(DEFAULT_AUDIO_CAPTURE_LEVEL),
   })
   .default({});
 
