@@ -119,7 +119,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     tailMs: config.ptt.tailMs,
   });
 
-  let stopped = false;
+  let hardStopped = false;
+  let started = false;
   let outboundQueue: Promise<void> = Promise.resolve();
   const logDir = join(homedir(), ".openclaw", "logs");
   const logDate = new Date().toISOString().slice(0, 10);
@@ -293,9 +294,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   };
 
   const start = async (ctx: ChannelGatewayStartContext<DigirigConfig>) => {
-    if (stopped) {
+    if (hardStopped || started) {
       return { stop: () => {} };
     }
+    started = true;
     logger = ctx.log ?? null;
 
     const updateStatus = (patch: Partial<{
@@ -710,7 +712,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
     return {
       stop: () => {
-        stopped = true;
+        started = false;
         audioMonitor.stop();
         updateStatus({
           running: false,
@@ -722,7 +724,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   };
 
   const stop = async () => {
-    stopped = true;
+    hardStopped = true;
+    started = false;
     audioMonitor.stop();
     wsClient?.close();
     await ptt.close();

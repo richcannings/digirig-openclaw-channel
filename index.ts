@@ -94,8 +94,10 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
       return runtime.start(ctx);
     },
     stopAccount: async () => {
-      const runtime = getRuntime();
+      if (!runtime) return;
       await runtime.stop();
+      runtime = null;
+      runtimePromise = null;
     },
   },
 };
