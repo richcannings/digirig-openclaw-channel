@@ -46,10 +46,24 @@ function isDirectCall(text: string, callsign?: string, aliases: string[] = []): 
 }
 
 
+export type DigirigCalibrationResult = {
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+  samples: number;
+  rms: number;
+  peak: number;
+  rmsDb: number;
+  peakDb: number;
+};
+
 export type DigirigRuntime = {
   start: (ctx: ChannelGatewayStartContext<DigirigConfig>) => Promise<{ stop: () => void }>;
   stop: () => Promise<void>;
   speak: (text: string) => Promise<void>;
+  startCalibration: (durationMs?: number) => void;
+  getCalibrationStatus: () => "idle" | "running" | "done";
+  getCalibrationResult: () => DigirigCalibrationResult | null;
 };
 
 function formatRadioReply(text: string, maxChars = 140): string {
@@ -114,6 +128,28 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
   let wsClient: WhisperLiveClient | null = null;
 
+  let calibration:
+    | null
+    | {
+        status: "idle" | "running" | "done";
+        startedAt: number;
+        durationMs: number;
+        samples: number;
+        sumSquares: number;
+        peak: number;
+        timer: NodeJS.Timeout | null;
+        result: DigirigCalibrationResult | null;
+      } = {
+    status: "idle",
+    startedAt: 0,
+    durationMs: 0,
+    samples: 0,
+    sumSquares: 0,
+    peak: 0,
+    timer: null,
+    result: null,
+  };
+
   const appendTranscript = async (line: string) => {
     await fs.mkdir(logDir, { recursive: true });
     await fs.appendFile(logPath, `${line}\n`);
@@ -160,6 +196,55 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     if (!text.trim()) return;
     const ts = new Date().toISOString();
     await appendTranscript(`[${ts}] ${speaker}: ${text.trim()}`);
+  };
+
+  const formatDb = (value: number) => {
+    if (!Number.isFinite(value)) return "-inf";
+    return `${value.toFixed(1)} dB`;
+  };
+
+  const finalizeCalibration = async () => {
+    if (!calibration || calibration.status !== "running") return;
+    const endedAt = Date.now();
+    const { samples, sumSquares, peak, startedAt, durationMs } = calibration;
+    const rms = samples ? Math.sqrt(sumSquares / samples) : 0;
+    const rmsDb = rms > 0 ? 20 * Math.log10(rms) : Number.NEGATIVE_INFINITY;
+    const peakDb = peak > 0 ? 20 * Math.log10(peak) : Number.NEGATIVE_INFINITY;
+    const result: DigirigCalibrationResult = {
+      startedAt,
+      endedAt,
+      durationMs,
+      samples,
+      rms,
+      peak,
+      rmsDb,
+      peakDb,
+    };
+    calibration.status = "done";
+    calibration.result = result;
+    calibration.timer = null;
+    const ts = new Date().toISOString();
+    await appendTranscript(
+      `[${ts}] CALIBRATE: rms=${formatDb(rmsDb)} peak=${formatDb(peakDb)} samples=${samples}`,
+    );
+  };
+
+  const startCalibration = (durationMs = 8000) => {
+    if (!calibration) return;
+    if (calibration.timer) {
+      clearTimeout(calibration.timer);
+      calibration.timer = null;
+    }
+    calibration.status = "running";
+    calibration.startedAt = Date.now();
+    calibration.durationMs = durationMs;
+    calibration.samples = 0;
+    calibration.sumSquares = 0;
+    calibration.peak = 0;
+    calibration.result = null;
+    calibration.timer = setTimeout(() => {
+      void finalizeCalibration();
+    }, durationMs);
   };
 
   const speak = async (text: string) => {
@@ -511,6 +596,16 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
     audioMonitor.on("recording-frame", (frame: Buffer) => {
       if (!frameBytes || frame.length !== frameBytes) return;
+      if (calibration && calibration.status === "running") {
+        const sampleCount = Math.floor(frame.length / 2);
+        for (let i = 0; i < sampleCount; i += 1) {
+          const sample = frame.readInt16LE(i * 2) / 32768;
+          const abs = Math.abs(sample);
+          calibration.sumSquares += sample * sample;
+          if (abs > calibration.peak) calibration.peak = abs;
+          calibration.samples += 1;
+        }
+      }
       if (wsClient) {
         wsClient.sendAudio(frame);
       }
@@ -538,6 +633,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             model: "Systran/faster-whisper-medium.en",
             task: "transcribe",
             useVad: false,
+            sendLastNSegments: 10,
           },
           ctx.log,
         );
@@ -563,9 +659,12 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         ctx.log?.info?.(
           `[digirig] STT start (rxToSttStartMs=${sttStartAt - rxEndAt})`,
         );
-        await wsClient.waitForIdle(200);
+        await wsClient.waitForIdle(1200);
         const text = normalizeSttText(wsClient.getText() || "");
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
+        if (text.trim()) {
+          await appendTranscript(`[${new Date().toISOString()}] RX_RAW: ${text.trim()}`);
+        }
         if (!text.trim()) {
           return;
         }
@@ -578,6 +677,13 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         if (lastFragment) {
           const lowerLast = lastFragment.toLowerCase();
           const lowerText = normalizedRx.toLowerCase();
+          if (
+            lowerText === lowerLast ||
+            lowerLast.endsWith(lowerText) ||
+            lowerText.endsWith(lowerLast)
+          ) {
+            return;
+          }
           if (lowerLast.endsWith(" usb") && (lowerText.startsWith("c ") || lowerText.startsWith("c-"))) {
             rxBuffer[rxBuffer.length - 1] = `${lastFragment} ${normalizedRx}`;
             return;
@@ -622,7 +728,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     await ptt.close();
   };
 
-  return { start, stop, speak };
+  const getCalibrationStatus = () => calibration?.status ?? "idle";
+  const getCalibrationResult = () => calibration?.result ?? null;
+
+  return { start, stop, speak, startCalibration, getCalibrationStatus, getCalibrationResult };
 }
 
 type CaptureMuteConfig = {

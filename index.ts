@@ -126,22 +126,17 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
   // @ts-expect-error plugin api shape is provided by OpenClaw at runtime
   api.registerChannel({ plugin: digirigPlugin });
 
-  // Manual TX command: /digirig tx <text>
-  // @ts-expect-error plugin api shape is provided by OpenClaw at runtime
-  api.registerCommand({
-    name: "digirig",
-    description: "DigiRig commands (tx)",
-    acceptsArgs: true,
-    requireAuth: false,
-    handler: async (ctx: { args?: string }) => {
-      const raw = (ctx.args ?? "").trim();
-      if (!raw) {
-        return { text: "Usage: /digirig tx <text>" };
-      }
-      const [cmd, ...rest] = raw.split(/\s+/);
-      if (cmd.toLowerCase() !== "tx") {
-        return { text: "Usage: /digirig tx <text>" };
-      }
+  const handleDigirigCommand = async (ctx: { args?: string }) => {
+    const raw = (ctx.args ?? "").trim();
+    if (!raw) {
+      return {
+        text:
+          "Usage: /digirig tx <text> | /digirig calibrate [seconds|status|result]",
+      };
+    }
+    const [cmd, ...rest] = raw.split(/\s+/);
+    const action = cmd.toLowerCase();
+    if (action === "tx") {
       const text = rest.join(" ").trim();
       if (!text) {
         return { text: "Usage: /digirig tx <text>" };
@@ -151,7 +146,64 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
       const callsign = cfg.channels?.digirig?.tx?.callsign ?? DEFAULT_TX_CALLSIGN;
       await runtime.speak(appendCallsign(text, callsign));
       return { text: "✅ Transmitted via DigiRig" };
-    },
+    }
+
+    if (action === "calibrate") {
+      const runtime = getRuntime();
+      const sub = (rest[0] ?? "").toLowerCase();
+      if (sub === "status") {
+        return { text: `Calibration status: ${runtime.getCalibrationStatus()}` };
+      }
+      if (sub === "result") {
+        const result = runtime.getCalibrationResult();
+        if (!result) {
+          return { text: "No calibration result yet. Run /digirig calibrate" };
+        }
+        return {
+          text:
+            "Calibration result:\n" +
+            `- RMS: ${result.rmsDb.toFixed(1)} dB\n` +
+            `- Peak: ${result.peakDb.toFixed(1)} dB\n` +
+            `- Samples: ${result.samples}\n` +
+            "\nTarget: RMS around -24 to -12 dB, Peak below -3 dB.",
+        };
+      }
+
+      const durationSec = Number.parseInt(sub || "8", 10);
+      const seconds = Number.isFinite(durationSec) ? durationSec : 8;
+      const durationMs = Math.max(3000, Math.min(seconds * 1000, 30000));
+      runtime.startCalibration(durationMs);
+      return {
+        text:
+          `Calibration started for ${Math.round(durationMs / 1000)}s. Speak NOW with a steady count (one-two-three...).\n` +
+          "When done, run: /digirig calibrate result",
+      };
+    }
+
+    return {
+      text:
+        "Usage: /digirig tx <text> | /digirig calibrate [seconds|status|result]",
+    };
+  };
+
+  // Manual TX command: /digirig tx <text>
+  // @ts-expect-error plugin api shape is provided by OpenClaw at runtime
+  api.registerCommand({
+    name: "digirig",
+    description: "DigiRig commands (tx, calibrate)",
+    acceptsArgs: true,
+    requireAuth: false,
+    handler: handleDigirigCommand,
+  });
+
+  // Alias: /digiread ...
+  // @ts-expect-error plugin api shape is provided by OpenClaw at runtime
+  api.registerCommand({
+    name: "digiread",
+    description: "Alias for /digirig",
+    acceptsArgs: true,
+    requireAuth: false,
+    handler: handleDigirigCommand,
   });
 
   // Agent tool: digirig_tx

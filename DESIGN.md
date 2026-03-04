@@ -1,209 +1,141 @@
 # DigiRig Voice Channel Design (OpenClaw)
 
 **Document name:** DigiRig Voice Channel  
-**Version:** 1.0  
-**Status:** Draft  
+**Version:** 1.1 (post re-review)  
+**Status:** Draft - migration planning  
 **Owner:** OpenClaw Channels  
 **Audience:** OpenClaw plugin developers, system integrators, operations
 
 ---
 
-## 1. Overview
+## 1. Objective
 
-The DigiRig Voice Channel is an OpenClaw channel plugin that bridges ham radio voice interactions into the OpenClaw conversational system. It enables one or more radio operators to speak over RF, have their speech transcribed to text, routed through OpenClaw’s agent system, and receive spoken replies transmitted back over the radio.
+Reduce DigiRig code size by converging on proven `voice-call` extension patterns in `~/src/openclaw/extensions/voice-call`, while preserving ham-radio behavior (PTT, callsign/direct-call policy, RF-safe short replies).
 
-This channel provides a voice interaction surface comparable in richness to a WhatsApp Channel, with structured routing, context/session handling, command processing, and response delivery. It also enforces ham-radio-appropriate policies for when the system is allowed to transmit.
-
----
-
-## 2. Goals
-
-- **Bidirectional voice interface**: RX (receive) audio → speech-to-text → OpenClaw agent response → text-to-speech → TX (transmit) audio.
-- **Low-latency interaction**: Streaming STT via WhisperLive WebSocket for fast turnarounds.
-- **Operational safety**: Enforce policy constraints on when the system may transmit.
-- **Simple local deployment**: Uses local audio devices and a DigiRig (or similar) audio/PTT interface.
-- **Traceability**: Logs RX/TX transcripts and latency metrics.
+Primary success metric: fewer DigiRig-specific code paths with no regression in RX->STT->agent->TX behavior.
 
 ---
 
-## 3. Non-Goals
+## 2. Current Snapshot (Re-review)
 
-- Support for media attachments or rich cards.
-- Multi-party chat threading.
-- Cloud-hosted STT/TTS services (local by default).
+Current TypeScript footprint (including tests): `1662` LOC.
+Largest module is [`src/runtime.ts`](./src/runtime.ts) at `686` LOC.
 
----
-
-## 4. System Context
-
-**External dependencies:**
-- **DigiRig or equivalent**: audio interface + PTT control via serial.
-- **ALSA** tools: `arecord` and `aplay` for raw audio capture and playback.
-- **WhisperLive** (local): WebSocket STT server (collabora/WhisperLive).
-- **OpenClaw runtime**: routing, session recording, TTS, and agent dispatch.
+Current DigiRig responsibility split:
+- `index.ts`: plugin registration, `/digirig tx` command, `digirig_tx` tool.
+- `src/runtime.ts`: audio orchestration, STT accumulation/finalization, routing, dispatch, transcript logging, TX serialization.
+- `src/audio-monitor.ts`: local VAD-like monitor and utterance framing.
+- `src/stt-ws.ts`: WhisperLive WebSocket transport.
+- `src/ptt.ts`: serial RTS toggling.
+- `src/tts.ts`: OpenClaw telephony TTS + `aplay`.
 
 ---
 
-## 5. Architecture
+## 3. Review Findings (Before Migration)
 
-### 5.1 High-Level Flow
+1. High: PTT can remain keyed if transmit playback throws.  
+`withTx()` does not guarantee `setTx(false)` in an error path (`src/ptt.ts` lines 59-70).
 
-1. **RX Audio Capture**
-   - `arecord` reads raw PCM from input device.
-   - AudioMonitor performs VAD-like energy detection and buffers frames.
-2. **STT**
-   - PCM frames are streamed to WhisperLive over WebSocket.
-   - Final transcript is read after end-of-utterance idle.
-3. **Routing**
-   - Transcribed text is packaged into OpenClaw inbound context.
-   - Route resolution selects agent and session.
-4. **Agent Reply**
-   - OpenClaw dispatches a reply (with channel formatting).
-   - Reply is shortened and appended with callsign as needed.
-5. **TX Playback**
-   - TTS generates PCM audio.
-   - PTT is asserted via serial, audio is played, PTT released.
+2. High: runtime lifecycle is not restart-safe after stop.  
+`stopped` is latched true and never reset (`src/runtime.ts` lines 108, 210-213, 605-623), while plugin caches the runtime singleton (`index.ts` lines 103-115).
 
-### 5.2 Components
+3. Medium: inconsistent shutdown path.  
+`start()` returned stop callback does not close websocket/PTT (`src/runtime.ts` lines 605-615), but `runtime.stop()` does (`src/runtime.ts` lines 618-623).
 
-- **`index.ts` (Plugin Entry)**
-  - Registers channel plugin, command (`/digirig tx`), and agent tool (`digirig_tx`).
-- **`config.ts`**
-  - Zod schema for configuration (audio/PTT/RX/STT/TX).
-- **`runtime.ts`**
-  - Core runtime orchestrator:
-    - AudioMonitor events
-    - STT streaming and finalization (WhisperLive WS)
-    - Routing and dispatch
-    - TX queueing
-- **`audio-monitor.ts`**
-  - Energy-based speech detection + buffering.
-- **`stt-ws.ts`**
-  - WhisperLive WebSocket client (PCM streaming).
-- **`tts.ts`**
-  - Wraps OpenClaw TTS and plays PCM via `aplay`.
-- **`ptt.ts`**
-  - Serial RTS control for PTT with lead/tail delays.
+4. Medium: config/schema drift.  
+`rx.startCooldownMs` exists in zod config (`src/config.ts` line 55) but is missing in `openclaw.plugin.json` schema (`openclaw.plugin.json` RX properties).
+
+5. Medium: `tx.allowToolTx` is enforced by tool code (`index.ts` line 181) but absent from DigiRig config schema and plugin JSON schema.
+
+These defects should be fixed as part of Phase 0 so migration does not build on unstable behavior.
 
 ---
 
-## 6. Detailed Design
+## 4. Convergence Strategy with `voice-call`
 
-### 6.1 RX Audio Pipeline
+DigiRig should keep hardware-specific code and remove channel/agent orchestration duplication.
 
-**AudioMonitor behavior**
-- Captures frames of PCM at configured `frameMs`.
-- Computes RMS energy per frame.
-- Starts recording on threshold exceedance (with a short start cooldown to avoid tail retriggers).
-- Stops recording after `maxSilenceMs` or `maxRecordMs`.
-- Emits:
-  - `recording-start`
-  - `recording-frame`
-  - `recording-end`
-  - `utterance` (final PCM for STT)
+### 4.1 Keep (DigiRig-specific)
+- `src/audio-monitor.ts` (local ALSA RX and speech windowing).
+- `src/stt-ws.ts` (WhisperLive protocol adapter, unless core later standardizes this).
+- `src/ptt.ts` (serial RTS hardware control).
+- ALSA playback glue (`aplay`/`amixer`) from `src/tts.ts` and `src/runtime.ts`.
 
-**Pre-roll**
-- Maintains a short pre-roll buffer so the beginning of speech is not clipped.
+### 4.2 Reuse/Adopt from `voice-call`
+- Telephony TTS config merge pattern from `voice-call/src/telephony-tts.ts` (`applyTtsOverride` + safe deep merge) to remove DigiRig-local TTS shaping drift.
+- Runtime modularization pattern from `voice-call/src/manager/*` to split `src/runtime.ts` into focused units (events, outbound, state, timers, persistence).
+- Response generation contract style from `voice-call/src/response-generator.ts` so DigiRig reply shaping is a thin policy wrapper, not a custom dispatch pipeline.
+- Config normalization discipline from `voice-call/src/config.ts` (strict, explicit defaults, no hidden settings).
 
-### 6.2 STT (WhisperLive WebSocket)
-
-- PCM frames are streamed to WhisperLive during recording.
-- After end-of-utterance, the client waits for idle and reads the latest transcript.
-- No HTTP fallback or final-only pass: WS is the single source of truth.
-
-**Normalization**
-- Removes blank or bracketed artifacts and very short fragments.
-
-### 6.3 Routing + Session Context
-
-- Builds an OpenClaw inbound message:
-  - Radio traffic is forced into a dedicated **digirig:radio** session.
-  - `Body` formatted via OpenClaw envelope formatting.
-- Records inbound session to store path.
-
-### 6.4 Policy Enforcement
-
-**Transmit policy (`tx.policy`)**
-- `direct-only`: only respond if the callsign/alias appears in input.
-- `value-and-wait`: require direct call and inject a delay before responding.
-- `proactive`: allow responses without explicit direct call.
-
-**Alias inference**
-- If `tx.aliases` empty, attempts to infer from `IDENTITY.md`.
-
-### 6.5 TX Pipeline
-
-- Uses outbound queue to serialize transmissions.
-- Optional capture mute (ALSA `amixer`) while transmitting.
-- Mutes RX during TX to prevent self‑triggered sessions.
-- PTT lead/tail timing to avoid clipping.
-
-### 6.6 Reply Formatting
-
-- Trims to a single sentence or max ~140 chars.
-- Appends callsign if missing.
-- Suppresses policy/refusal language on-air; sends “Received.” as fallback.
-- Special handling of closing phrases to reply with “Thanks, seven three.”
+### 4.3 Delete/Collapse in DigiRig
+- Large inline `finalizeRx` and dispatch block in `src/runtime.ts` by extracting reusable reply+delivery handler(s).
+- Duplicate config/transformation logic that can be delegated to shared helper(s).
+- Redundant route/session assembly code where OpenClaw channel APIs already provide helpers.
 
 ---
 
-## 7. Operational Considerations
+## 5. Migration Plan (Delete-First)
 
-### 7.1 Configuration
+## Phase 0 - Stabilize
+- Fix PTT error-path unkeying.
+- Make runtime fully restart-safe (`stop` releases resources and allows subsequent `start`).
+- Unify stop semantics between returned account stop callback and `runtime.stop()`.
+- Align config surfaces (`startCooldownMs`, `allowToolTx`) across zod + plugin JSON + docs.
 
-Key settings (see `openclaw.plugin.json`):
+## Phase 1 - Carve `runtime.ts` into modules
+- Create `src/runtime/` with:
+  - `state.ts` (mutable session/runtime state),
+  - `rx.ts` (recording/STT accumulation),
+  - `reply.ts` (route/dispatch/format policy),
+  - `tx.ts` (queue/PTT/TTS/capture mute),
+  - `logging.ts`.
+- Keep behavior unchanged; target is structural extraction only.
 
-- **Audio**
-  - `audio.inputDevice`, `audio.outputDevice`, `audio.sampleRate`
-- **PTT**
-  - `ptt.device`, `ptt.rts`, `ptt.leadMs`, `ptt.tailMs`
-- **RX**
-  - `rx.energyThreshold`, `rx.minSpeechMs`, `rx.maxSilenceMs`, `rx.maxRecordMs`
-- **STT**
-  - `stt.wsUrl` (WhisperLive WebSocket endpoint)
-- **TX**
-  - `tx.callsign`, `tx.policy`, `tx.aliases`
+## Phase 2 - Port `voice-call` patterns
+- Introduce a DigiRig reply service shaped like `voice-call` response flow (single entrypoint, deterministic outputs).
+- Introduce a shared/safe deep-merge utility for telephony TTS overrides as in `voice-call`.
+- Normalize config parse/resolve path to avoid implicit settings.
 
-### 7.2 Logging
+## Phase 3 - Remove duplicated logic
+- Replace ad-hoc inline policy + fallback checks with concise policy module.
+- Collapse duplicated transcript/session handling into shared helpers.
+- Remove dead paths discovered during extraction.
 
-- Transcript logs at `~/.openclaw/logs/digirig-YYYY-MM-DD.log`
-- Response timing metrics appended in transcript logs.
-
-### 7.3 Failure Modes
-
-- `arecord` errors are logged; audio monitor stops on failure.
-- STT failures → logged; next utterance will try again.
-- PTT not configured → TX silently disabled if `ptt.rts=false`.
-
----
-
-## 8. Security and Compliance
-
-- Local-only STT server (recommended for privacy).
-- No remote calls beyond configured STT endpoint.
-- PTT gating ensures that transmission is intentional and policy-compliant.
-
----
-
-## 9. Related Systems & Patterns
-
-This design mirrors common patterns in modern voice pipelines:
-- Streaming STT via WhisperLive WebSocket: low-latency transcript updates during capture.
-- VAD-based sessioning (RealtimeSTT, WebRTC VAD): explicit start and stop gating and cooldowns to avoid tail retriggers.
-- Duplex protection: muting local RX during TX to prevent self-triggered loops.
-
-Our implementation combines these patterns with explicit TX policy gating and ham-radio-friendly formatting.
-
-## 10. Improvements (Build on Current Design)
-
-Small, incremental upgrades that preserve the current architecture:
-- RX timing metrics: log both PTT release to TX start and RX end to TX start for operator-perceived latency.
-- Adaptive cooldown: increase start cooldown automatically after a TX event to reduce post-TX retriggers.
-- VAD refinement: optional hysteresis start stop thresholds if operating environments are noisy.
-- Agent reply constraints: concise radio-mode prompts and length caps to reduce TTS time.
+## Phase 4 - Upstream readiness
+- Add regression tests for:
+  - direct-only/value-and-wait/proactive behavior,
+  - retry/restart lifecycle,
+  - PTT always-unkeyed invariant,
+  - TX fallback responses.
+- Prepare small, reviewable PR sequence aimed at OpenClaw mainline.
 
 ---
 
-## 11. Summary
+## 6. Acceptance Criteria
 
-The DigiRig Voice Channel integrates ham radio audio into OpenClaw with robust RX detection, WhisperLive streaming STT, policy-aware routing, and controlled TX. It delivers a conversational experience comparable to chat-based channels while respecting RF constraints and operator intent.
+- DigiRig total LOC reduced materially (target: 25-40% reduction from current `1662` LOC, excluding tests generated by added coverage).
+- `src/runtime.ts` no longer monolithic (target: <=250 LOC top-level orchestrator).
+- No behavior regressions in RX/TX policy semantics.
+- Runtime can stop/start repeatedly without process restart.
+- PTT is always released on success and failure paths.
+- Config settings exposed consistently across schema/UI/runtime.
+
+---
+
+## 7. Risks and Mitigations
+
+- Risk: migration changes timing behavior on-air.  
+Mitigation: preserve existing frame/silence thresholds and compare latency metrics before/after.
+
+- Risk: over-generalizing for future shared module too early.  
+Mitigation: first refactor inside DigiRig, then extract shared code only after parity tests pass.
+
+- Risk: reduced readability during transition.  
+Mitigation: phase-by-phase commits with strict no-behavior-change boundaries in Phase 1.
+
+---
+
+## 8. Immediate Next Step
+
+Execute **Phase 0 (stabilize)** first, then begin **Phase 1 runtime extraction**.  
+This sequence maximizes safety and ensures the codebase is in a reliable state before deletion-heavy convergence work.

@@ -77,7 +77,7 @@ export class WhisperLiveClient {
 
   end(): void {
     if (this.open && this.ws) {
-      this.ws.send("END_OF_AUDIO");
+      this.ws.send(Buffer.from("END_OF_AUDIO"));
     }
   }
 
