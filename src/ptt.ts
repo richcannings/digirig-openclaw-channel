@@ -59,15 +59,18 @@ export class PttController {
   async withTx<T>(fn: () => Promise<T>): Promise<T> {
     await this.open();
     await this.setTx(true);
-    if (this.config.leadMs > 0) {
-      await delay(this.config.leadMs);
+    try {
+      if (this.config.leadMs > 0) {
+        await delay(this.config.leadMs);
+      }
+      const result = await fn();
+      if (this.config.tailMs > 0) {
+        await delay(this.config.tailMs);
+      }
+      return result;
+    } finally {
+      await this.setTx(false);
     }
-    const result = await fn();
-    if (this.config.tailMs > 0) {
-      await delay(this.config.tailMs);
-    }
-    await this.setTx(false);
-    return result;
   }
 }
 

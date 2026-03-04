@@ -64,7 +64,7 @@ const DigirigTxSchema = z
   .object({
     callsign: z.string().min(1).default(DEFAULT_TX_CALLSIGN),
     policy: z
-      .enum(["direct-only", "value-and-wait", "proactive"])
+      .enum(["direct-only", "proactive"])
       .default(DEFAULT_TX_POLICY),
     aliases: z.string().default(DEFAULT_TX_ALIASES),
   })

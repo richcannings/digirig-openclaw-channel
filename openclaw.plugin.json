@@ -3,51 +3,6 @@
   "channels": [
     "digirig"
   ],
-  "uiHints": {
-    "audio.inputDevice": {
-      "placeholder": "plughw:0,0"
-    },
-    "audio.outputDevice": {
-      "placeholder": "plughw:0,0"
-    },
-    "ptt": {
-      "label": "PTT"
-    },
-    "ptt.device": {
-      "label": "PTT USB Serial Port",
-      "placeholder": "/dev/ttyUSB0"
-    },
-    "ptt.leadMs": {
-      "label": "PTT Lead (ms)"
-    },
-    "ptt.tailMs": {
-      "label": "PTT Tail (ms)"
-    },
-    "tx.callsign": {
-      "label": "TX Callsign",
-      "help": "Appended to final responses if not already present."
-    },
-    "tx.aliases": {
-      "label": "TX Aliases (comma-separated)",
-      "help": "Names/callsigns that count as direct calls. Leave blank to auto-infer from IDENTITY.md at startup."
-    },
-    "rx.energyThreshold": {
-      "label": "RX Energy Threshold"
-    },
-    "rx.minSpeechMs": {
-      "label": "RX Min Speech (ms)"
-    },
-    "rx.maxSilenceMs": {
-      "label": "RX Max Silence (ms)"
-    },
-    "stt": {
-      "label": "Speech Recognition"
-    },
-    "stt.wsUrl": {
-      "label": "WhisperLive WS URL",
-      "help": "WebSocket endpoint (e.g. ws://127.0.0.1:28080)."
-    }
-  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
