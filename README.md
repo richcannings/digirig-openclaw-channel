@@ -1,66 +1,117 @@
-# DigiRig Channel for OpenClaw.
+# DigiRig OpenClaw Channel
 
-Talk to OpenClaw over ham radio. 
+Talk to OpenClaw over ham radio (local DigiRig + radio + OpenClaw gateway).
 
-This plugin provides local ham radio RX/TX using VOX or PTT via a digirig.
+This plugin provides:
+- RX transcription from on-air audio
+- Agent responses back over RF
+- `/digirig tx` manual transmit command
+- `/digirig calibrate` audio-level calibration
 
-## Install from source
+---
+
+## Quick Start (GitHub operator setup)
+
+## 1) Install plugin
 ```bash
-# pick a location
 mkdir -p ~/src
 cd ~/src
-
 git clone https://github.com/richcannings/digirig-openclaw-channel
 cd digirig-openclaw-channel
 npm install
-
 openclaw plugins install -l ~/src/digirig-openclaw-channel
-openclaw gateway restart
 ```
 
-## Configure
-
-Configuration is possible through the web ui, command line, and of course by talking with openclaw. Here are the commmand line settings.
-
-### Audio devices
+## 2) Configure audio + PTT
 ```bash
+# inspect devices
 arecord -l
 aplay -l
+
+# set DigiRig devices
 openclaw config set channels.digirig.audio.inputDevice "plughw:0,0"
 openclaw config set channels.digirig.audio.outputDevice "plughw:0,0"
-```
 
-### PTT
-This can also be used for testing so that openclaw does not transmit.
-```bash
+# set PTT serial
 openclaw config set channels.digirig.ptt.device "/dev/ttyUSB0"
 openclaw config set channels.digirig.ptt.rts true
 ```
 
-### STT (WhisperLive WebSocket)
-Streaming STT uses the collabora/WhisperLive server over WebSocket.
-
-1) Run WhisperLive (example)
-```bash
-# inside your WhisperLive venv
-python3 /path/to/whisperlive/run_server.py --port 28080 --backend faster_whisper   -fw Systran/faster-whisper-medium.en -c /path/to/models/whisper
-```
-
-2) Point DigiRig at the WS endpoint
+## 3) Configure STT endpoint (WhisperLive WS)
 ```bash
 openclaw config set channels.digirig.stt.wsUrl "ws://127.0.0.1:28080"
 ```
 
-**Notes**
-- WS STT is the only supported STT mode.
-- Ensure the WhisperLive server is running before starting DigiRig.
+> Ensure your WhisperLive websocket server is running before testing RX.
 
-### TX callsign
+## 4) Set callsign + policy
 ```bash
 openclaw config set channels.digirig.tx.callsign "W6RGC/AI"
+openclaw config set channels.digirig.tx.policy "proactive"   # proactive | direct-only
+openclaw config set channels.digirig.tx.aliases "Overlord,Lord,Seven,7"
 ```
 
-### TX disable (RX-only)
+## 5) Latency-focused RX defaults (recommended)
 ```bash
-openclaw config set channels.digirig.ptt.rts false
+openclaw config set channels.digirig.rx.maxSilenceMs 1000
+openclaw config set channels.digirig.rx.busyHoldMs 800
+openclaw config set channels.digirig.rx.minSpeechMs 500
+openclaw config set channels.digirig.rx.maxRecordMs 120000
+openclaw config set channels.digirig.rx.preRollMs 300
 ```
+
+## 6) Restart gateway
+```bash
+openclaw gateway restart
+```
+
+## 7) On-air test
+Transmit:
+> “Overlord, this is Rich W6RGC. What is 2 plus 2?”
+
+You should hear a spoken response and see RX/TX lines in:
+```bash
+~/.openclaw/logs/digirig-YYYY-MM-DD.log
+```
+
+---
+
+## Commands
+
+### Manual TX
+```bash
+/digirig tx Hello from OpenClaw
+```
+
+### Calibrate audio
+```bash
+/digirig calibrate
+# then:
+/digirig calibrate result
+```
+
+---
+
+## Troubleshooting
+
+- Check gateway/channel health:
+```bash
+openclaw status
+openclaw gateway status
+```
+
+- Check DigiRig logs:
+```bash
+openclaw logs --plain | grep -i digirig | tail -n 80
+```
+
+- Confirm STT WS listener:
+```bash
+ss -ltnp | grep 28080
+```
+
+---
+
+## Docs
+- Design notes: `docs/DESIGN.md`
+- Implementation roadmap: `ROADMAP.md`
