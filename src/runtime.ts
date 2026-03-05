@@ -319,7 +319,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         if (!rxFinalized && sessionId === rxSessionId) {
           void finalizeRx();
         }
-      }, 200);
+      }, 80);
     };
 
     const finalizeRx = async () => {
@@ -523,8 +523,12 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         ctx.log?.info?.(
           `[digirig] STT start (rxToSttStartMs=${sttStartAt - rxEndAt})`,
         );
-        await transcriber.waitForResult(1200);
-        const text = normalizeSttText(transcriber.getText() || "");
+        await transcriber.waitForResult(350);
+        let text = normalizeSttText(transcriber.getText() || "");
+        if (!text.trim()) {
+          await transcriber.waitForResult(850);
+          text = normalizeSttText(transcriber.getText() || "");
+        }
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
         if (!text.trim()) {
           return;
