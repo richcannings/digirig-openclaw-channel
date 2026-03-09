@@ -17,6 +17,15 @@
 
 ## Next Milestones
 
+### M0 (Highest Priority): On-air personality + ham-operator behavior pack
+- Define and enforce radio persona/voice for on-air interactions.
+- Add explicit behavior guidance for:
+  - routine QSOs (call, response, brevity, sign-offs)
+  - net operations (check-ins, net control interactions, directed traffic)
+  - general ham etiquette (ID cadence, clarity, turn-taking, professional tone)
+- Encode this in prompt/policy assets and regression-test with simulated transcripts.
+- Include examples of good/bad responses for consistent operator-style behavior.
+
 ### M1: Policy module extraction
 - Move policy decisions from `runtime.ts` into `src/policy.ts`
 - Keep behavior unchanged
@@ -45,6 +54,7 @@
 - Latency: maintain or improve ~5s median PTT-release to response carrier
 - Size: continued net reduction in runtime complexity and branching
 - Operability: straightforward setup from README on a fresh host
+- Safety invariants: PTT always unkeys, restart behavior remains deterministic
 
 ## Testing Cadence
 After each milestone:

@@ -1,16 +1,22 @@
 # DigiRig OpenClaw Channel
 
-Talk to OpenClaw over ham radio (local DigiRig + radio + OpenClaw gateway).
+Talk to OpenClaw over ham radio.
+
+This plugin provides a bridge between voice ham radio operations and OpenClaw.
 
 This plugin provides:
-- RX transcription from on-air audio
-- Agent responses back over RF
-- `/digirig tx` manual transmit command
-- `/digirig calibrate` audio-level calibration
+- Speech-to-text to agent to text-to-speech pipeline
+- digirig PTT handling and VOX support 
+- Carrier detection and transmission queuing for half-duplex operation
+- Transcription logging
+- `/digirig tx` manual transmit a message over-the-air
+- `/digirig calibrate` AI assisted audio-level calibration
 
 ---
 
 ## Quick Start (GitHub operator setup)
+
+TODO(overlord): Create a first step to install and configure openclaw. Provide a github link link.
 
 ## 1) Install plugin
 ```bash

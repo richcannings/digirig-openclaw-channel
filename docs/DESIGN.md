@@ -57,8 +57,5 @@ Observed ~5s is typically dominated by:
 
 RX silence gate tuning improved response significantly from prior 11–12s behavior.
 
-## Next Design Direction
-Continue shrinking runtime surface by:
-- isolating policy decisions into a compact policy module
-- moving reusable non-RF helpers upstream/shared where practical
-- preserving strict RF reliability invariants (PTT safety, restart safety, deterministic stop)
+## Planning Notes
+Execution sequencing and future milestones are tracked in `ROADMAP.md` to keep this document focused on current architecture and invariants.
