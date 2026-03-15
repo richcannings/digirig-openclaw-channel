@@ -68,14 +68,16 @@ export type DigirigRuntime = {
   getCalibrationResult: () => DigirigCalibrationResult | null;
 };
 
-function formatRadioReply(text: string, maxChars = 140): string {
+function formatRadioReply(text: string, maxWords = 300): string {
   const trimmed = text.trim().replace(/\s+/g, " ");
   if (!trimmed) {
     return "";
   }
-  const sentenceMatch = trimmed.match(/^(.+?[\.!\?])(\s|$)/);
-  const base = sentenceMatch ? sentenceMatch[1] : trimmed;
-  return base.slice(0, maxChars).trim();
+  const words = trimmed.split(" ");
+  if (words.length <= maxWords) {
+    return trimmed;
+  }
+  return words.slice(0, maxWords).join(" ").trim();
 }
 
 function normalizeSttText(text: string): string {
@@ -488,7 +490,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         return;
       }
 
-      const radioPrompt = "Radio mode: respond briefly for on-air voice, keep phrasing clear for speech playback, and preserve callsigns when heard. Do not mention policy, tools, or refusal; just answer or acknowledge.";
+      const radioPrompt = "Radio mode: respond with 300 words or less for on-air voices, keep phrasing clear for speech playback, and preserve callsigns when heard. Do not mention policy, tools, or refusal; just answer or acknowledge.";
       const ctxPayload = createRadioContextPayload(runtime, cfg, route, text, radioPrompt);
 
       await recordInboundSession(runtime, cfg, route, ctxPayload, ctx.log);
