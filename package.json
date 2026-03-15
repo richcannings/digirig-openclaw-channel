@@ -9,6 +9,12 @@
       "./index.ts"
     ]
   },
+  "scripts": {
+    "test": "vitest run",
+    "test:smoke": "./scripts/self-test.sh",
+    "setup:whisperlive": "./scripts/setup-whisperlive-systemd.sh",
+    "setup:quickstart": "./scripts/setup-digirig-whisperlive.sh"
+  },
   "dependencies": {
     "@sinclair/typebox": "^0.34.48",
     "@types/ws": "^8.18.1",

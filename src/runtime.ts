@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ChannelGatewayStartContext } from "openclaw/plugin-sdk";
 import { createRadioContextPayload, dispatchRadioReply, recordInboundSession } from "./channel-core.js";
@@ -60,7 +60,7 @@ export type DigirigCalibrationResult = {
 };
 
 export type DigirigRuntime = {
-  start: (ctx: ChannelGatewayStartContext<DigirigConfig>) => Promise<{ stop: () => void }>;
+  start: (ctx: ChannelGatewayStartContext<DigirigConfig>) => Promise<void>;
   stop: () => Promise<void>;
   speak: (text: string) => Promise<void>;
   startCalibration: (durationMs?: number) => void;
@@ -130,6 +130,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let logger: ChannelGatewayStartContext<DigirigConfig>["log"] | null = null;
 
   let transcriber: Transcriber | null = null;
+  let sttServerProc: ReturnType<typeof spawn> | null = null;
+  let sttEnsureTimer: NodeJS.Timeout | null = null;
+  let runLoopAbort: AbortController | null = null;
+  let whisperAutoStartWarned = false;
 
   let calibration:
     | null
@@ -268,12 +272,113 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     await outboundQueue;
   };
 
+  const ensureConfiguredSttServer = async (log?: { info?: (m: string)=>void; warn?: (m: string)=>void; error?: (m: string)=>void }) => {
+    const server = (config.stt as any)?.server;
+    if (!server || typeof server !== "object") return;
+    const command = typeof server.command === "string" ? server.command.trim() : "";
+    if (!command) return;
+
+    const streamUrl = typeof (config.stt as any)?.streamUrl === "string"
+      ? (config.stt as any).streamUrl
+      : "http://127.0.0.1:18080/inference";
+
+    // If STT HTTP endpoint is already alive, no need to spawn another process.
+    if (await isHttpAlive(streamUrl, 1200)) return;
+    if (sttServerProc && !sttServerProc.killed) return;
+
+    let host = "127.0.0.1";
+    let port = "18080";
+    try {
+      const u = new URL(streamUrl);
+      host = u.hostname || host;
+      port = u.port || port;
+    } catch {}
+
+    const modelPath = typeof server.modelPath === "string" ? server.modelPath : "";
+    const argTemplate = typeof server.args === "string" ? server.args : "";
+    const args = argTemplate
+      .replaceAll("{model}", modelPath)
+      .replaceAll("{host}", host)
+      .replaceAll("{port}", port)
+      .split(/\s+/)
+      .filter(Boolean);
+
+    try {
+      sttServerProc = spawn(command, args, { stdio: "ignore", detached: false });
+      sttServerProc.once("error", (err) => {
+        log?.error?.(`[digirig] failed to start STT server: ${String(err)}`);
+        sttServerProc = null;
+      });
+      sttServerProc.on("exit", (code) => {
+        log?.warn?.(`[digirig] STT server exited (${code ?? "?"})`);
+        sttServerProc = null;
+      });
+      log?.info?.(`[digirig] ensured STT server process: ${command} ${args.join(" ")}`);
+    } catch (err) {
+      log?.error?.(`[digirig] failed to start STT server: ${String(err)}`);
+    }
+  };
+
+  const ensureWhisperLiveWs = async (log?: { info?: (m: string)=>void; warn?: (m: string)=>void; error?: (m: string)=>void }) => {
+    const wsUrl = (config.stt?.wsUrl ?? "").trim();
+    if (!wsUrl) return;
+
+    let url: URL;
+    try {
+      url = new URL(wsUrl);
+    } catch {
+      return;
+    }
+
+    const host = url.hostname;
+    const isLocalHost = host === "127.0.0.1" || host === "localhost";
+    if (!isLocalHost) return;
+
+    const port = Number(url.port || "28080");
+    if (!Number.isFinite(port) || port <= 0) return;
+
+    if (await isTcpAlive(host, port, 1200)) return;
+
+    const shouldAutoStart = (config.stt as any)?.whisperLiveAutoStart !== false;
+    if (!shouldAutoStart) return;
+
+    const serviceName = typeof (config.stt as any)?.whisperLiveService === "string"
+      ? (config.stt as any).whisperLiveService
+      : "whisperlive.service";
+
+    try {
+      await runCommand("systemctl", ["--user", "start", serviceName]);
+      const alive = await isTcpAlive(host, port, 1500);
+      if (alive) {
+        whisperAutoStartWarned = false;
+        log?.info?.(`[digirig] WhisperLive auto-started via systemd user service: ${serviceName}`);
+      } else if (!whisperAutoStartWarned) {
+        whisperAutoStartWarned = true;
+        log?.warn?.(`[digirig] WhisperLive start requested but WS is still unreachable at ${wsUrl}. Run: systemctl --user status ${serviceName}`);
+      }
+    } catch (err) {
+      if (!whisperAutoStartWarned) {
+        whisperAutoStartWarned = true;
+        log?.warn?.(`[digirig] WhisperLive auto-start failed (${serviceName}): ${String(err)}`);
+        log?.warn?.("[digirig] First-run fix: run ./scripts/setup-whisperlive-systemd.sh (from plugin repo), then openclaw gateway restart");
+      }
+    }
+  };
+
   const start = async (ctx: ChannelGatewayStartContext<DigirigConfig>) => {
     if (hardStopped || started) {
-      return { stop: () => {} };
+      return;
     }
     started = true;
     logger = ctx.log ?? null;
+    await ensureConfiguredSttServer(ctx.log);
+    await ensureWhisperLiveWs(ctx.log);
+    if (sttEnsureTimer) clearInterval(sttEnsureTimer);
+    sttEnsureTimer = setInterval(() => {
+      void ensureConfiguredSttServer(ctx.log);
+      void ensureWhisperLiveWs(ctx.log);
+    }, 15000);
+    runLoopAbort = new AbortController();
 
     const updateStatus = (patch: Partial<{
       running: boolean;
@@ -383,7 +488,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         return;
       }
 
-      const radioPrompt = "Radio mode: respond briefly for on-air voice. Do not mention policy, tools, or refusal; just answer or acknowledge.";
+      const radioPrompt = "Radio mode: respond briefly for on-air voice, keep phrasing clear for speech playback, and preserve callsigns when heard. Do not mention policy, tools, or refusal; just answer or acknowledge.";
       const ctxPayload = createRadioContextPayload(runtime, cfg, route, text, radioPrompt);
 
       await recordInboundSession(runtime, cfg, route, ctxPayload, ctx.log);
@@ -508,12 +613,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       transcriber.startTurn();
     });
 
-    audioMonitor.on("utterance", async (_utterance) => {
+    audioMonitor.on("utterance", async (utterance) => {
       if (rxFinalized) {
-        return;
-      }
-      if (!transcriber) {
-        ctx.log?.warn?.("[digirig] STT skipped: WS client not ready");
         return;
       }
       sttInFlight = true;
@@ -523,12 +624,34 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         ctx.log?.info?.(
           `[digirig] STT start (rxToSttStartMs=${sttStartAt - rxEndAt})`,
         );
-        await transcriber.waitForResult(350);
-        let text = normalizeSttText(transcriber.getText() || "");
-        if (!text.trim()) {
-          await transcriber.waitForResult(850);
+
+        let text = "";
+        if (transcriber) {
+          await transcriber.waitForResult(350);
           text = normalizeSttText(transcriber.getText() || "");
+          if (!text.trim()) {
+            await transcriber.waitForResult(850);
+            text = normalizeSttText(transcriber.getText() || "");
+          }
         }
+
+        if (!text.trim()) {
+          const localCfg = (config.stt as any)?.localWhisper ?? {};
+          text = normalizeSttText(
+            await transcribeWithLocalWhisper({
+              pcm16: utterance as Buffer,
+              sampleRate: config.audio.sampleRate,
+              log: ctx.log,
+              command: typeof localCfg.command === "string" ? localCfg.command : "whisper",
+              model: typeof localCfg.model === "string" ? localCfg.model : "base",
+              language: typeof (config.stt as any)?.language === "string" ? (config.stt as any).language : "en",
+            }),
+          );
+          if (text) {
+            ctx.log?.info?.("[digirig] STT source: local whisper fallback");
+          }
+        }
+
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
         if (!text.trim()) {
           return;
@@ -568,26 +691,50 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       lastStartAt: Date.now(),
       lastError: null,
     });
-
-    return {
-      stop: () => {
-        started = false;
-        audioMonitor.stop();
-        transcriber?.close();
-        updateStatus({
-          running: false,
-          connected: false,
-          lastStopAt: Date.now(),
-        });
-      },
+    const abortRunLoop = () => {
+      runLoopAbort?.abort();
     };
+    ctx.abortSignal.addEventListener("abort", abortRunLoop, { once: true });
+    try {
+      await waitForAbort(runLoopAbort.signal);
+    } finally {
+      ctx.abortSignal.removeEventListener("abort", abortRunLoop);
+      started = false;
+      audioMonitor.stop();
+      transcriber?.close();
+      transcriber = null;
+      if (sttEnsureTimer) {
+        clearInterval(sttEnsureTimer);
+        sttEnsureTimer = null;
+      }
+      if (sttServerProc && !sttServerProc.killed) {
+        sttServerProc.kill("SIGTERM");
+        sttServerProc = null;
+      }
+      runLoopAbort = null;
+      updateStatus({
+        running: false,
+        connected: false,
+        lastStopAt: Date.now(),
+      });
+    }
   };
 
   const stop = async () => {
     hardStopped = true;
+    runLoopAbort?.abort();
     started = false;
     audioMonitor.stop();
     transcriber?.close();
+    transcriber = null;
+    if (sttEnsureTimer) {
+      clearInterval(sttEnsureTimer);
+      sttEnsureTimer = null;
+    }
+    if (sttServerProc && !sttServerProc.killed) {
+      sttServerProc.kill("SIGTERM");
+      sttServerProc = null;
+    }
     await ptt.close();
   };
 
@@ -595,6 +742,98 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   const getCalibrationResult = () => calibration?.result ?? null;
 
   return { start, stop, speak, startCalibration, getCalibrationStatus, getCalibrationResult };
+}
+
+async function isHttpAlive(url: string, timeoutMs = 1200): Promise<boolean> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { method: "GET", signal: ctrl.signal });
+    return !!res;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function isTcpAlive(host: string, port: number, timeoutMs = 1200): Promise<boolean> {
+  try {
+    const net = await import("node:net");
+    return await new Promise<boolean>((resolve) => {
+      const socket = net.createConnection({ host, port });
+      let done = false;
+      const finish = (ok: boolean) => {
+        if (done) return;
+        done = true;
+        socket.destroy();
+        resolve(ok);
+      };
+      socket.once("connect", () => finish(true));
+      socket.once("error", () => finish(false));
+      socket.setTimeout(timeoutMs, () => finish(false));
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function transcribeWithLocalWhisper(params: {
+  pcm16: Buffer;
+  sampleRate: number;
+  log?: { warn?: (m: string) => void; error?: (m: string) => void };
+  command?: string;
+  model?: string;
+  language?: string;
+}): Promise<string> {
+  const { pcm16, sampleRate, log } = params;
+  if (!pcm16?.length) return "";
+  const cmd = (params.command || "whisper").trim();
+  const model = (params.model || "base").trim();
+  const language = (params.language || "en").trim();
+
+  const dir = await fs.mkdtemp(join(tmpdir(), "digirig-whisper-"));
+  const wavPath = join(dir, "rx.wav");
+  const outDir = join(dir, "out");
+  await fs.mkdir(outDir, { recursive: true });
+
+  const header = Buffer.alloc(44);
+  const byteRate = sampleRate * 2;
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcm16.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcm16.length, 40);
+  await fs.writeFile(wavPath, Buffer.concat([header, pcm16]));
+
+  const args = [
+    wavPath,
+    "--model", model,
+    "--language", language,
+    "--fp16", "False",
+    "--output_format", "txt",
+    "--output_dir", outDir,
+  ];
+
+  try {
+    await runCommand(cmd, args);
+    const txtPath = join(outDir, "rx.txt");
+    const txt = await fs.readFile(txtPath, "utf8");
+    return txt.trim();
+  } catch (err) {
+    log?.warn?.(`[digirig] local whisper fallback failed: ${String(err)}`);
+    return "";
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 type CaptureMuteConfig = {
@@ -636,6 +875,15 @@ async function runCommand(cmd: string, args: string[]): Promise<void> {
         reject(new Error(`${cmd} ${args.join(" ")} exited ${code ?? "?"}${details ? `: ${details}` : ""}`));
       }
     });
+  });
+}
+
+async function waitForAbort(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
   });
 }
 

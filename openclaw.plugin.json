@@ -104,7 +104,24 @@
         "additionalProperties": false,
         "properties": {
           "wsUrl": {
-            "type": "string"
+            "type": "string",
+            "description": "WhisperLive WebSocket endpoint (default ws://127.0.0.1:28080)."
+          },
+          "whisperLiveAutoStart": {
+            "type": "boolean",
+            "description": "When true, DigiRig attempts to start the local WhisperLive systemd user service if wsUrl is not reachable."
+          },
+          "whisperLiveService": {
+            "type": "string",
+            "description": "systemd user service name used for auto-start (default whisperlive.service)."
+          },
+          "server": {
+            "type": "object",
+            "description": "Optional legacy STT server process bootstrap (compat mode)."
+          },
+          "localWhisper": {
+            "type": "object",
+            "description": "Optional local whisper CLI fallback settings."
           }
         }
       }

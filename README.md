@@ -11,12 +11,14 @@ This plugin provides:
 - Transcription logging
 - `/digirig tx` manual transmit a message over-the-air
 - `/digirig calibrate` AI assisted audio-level calibration
+- `/digirig doctor` service + listener diagnostics
+- `/digirig setup` prints host-aware setup commands
 
 ---
 
-## Quick Start (GitHub operator setup)
+## Quick Start (no-brainer setup)
 
-TODO(overlord): Create a first step to install and configure openclaw. Provide a github link link.
+This plugin now assumes **WhisperLive over local WebSocket** and can auto-start a local `whisperlive.service` if needed.
 
 ## 1) Install plugin
 ```bash
@@ -26,6 +28,15 @@ git clone https://github.com/richcannings/digirig-openclaw-channel
 cd digirig-openclaw-channel
 npm install
 openclaw plugins install -l ~/src/digirig-openclaw-channel
+```
+
+### Minimal install (copy/paste)
+```bash
+cd ~/src/digirig-openclaw-channel
+npm install
+npm run setup:quickstart
+openclaw plugins install -l ~/src/digirig-openclaw-channel
+openclaw gateway restart
 ```
 
 ## 2) Configure audio + PTT
@@ -43,21 +54,43 @@ openclaw config set channels.digirig.ptt.device "/dev/ttyUSB0"
 openclaw config set channels.digirig.ptt.rts true
 ```
 
-## 3) Configure STT endpoint (WhisperLive WS)
+## 3) Install WhisperLive as a persistent user service (recommended)
 ```bash
-openclaw config set channels.digirig.stt.wsUrl "ws://127.0.0.1:28080"
+cd ~/src/digirig-openclaw-channel
+npm run setup:whisperlive
 ```
 
-> Ensure your WhisperLive websocket server is running before testing RX.
+### One-command bootstrap (service + DigiRig STT config)
+```bash
+npm run setup:quickstart
+```
 
-## 4) Set callsign + policy
+This creates and enables:
+- `~/.config/systemd/user/whisperlive.service`
+- `~/.local/bin/run-whisperlive-server.py`
+
+## 4) Configure STT endpoint (WhisperLive WS)
+If you ran `npm run setup:quickstart`, this is already done.
+
+```bash
+openclaw config set channels.digirig.stt.wsUrl "ws://127.0.0.1:28080"
+openclaw config set channels.digirig.stt.whisperLiveAutoStart true
+openclaw config set channels.digirig.stt.whisperLiveService "whisperlive.service"
+```
+
+If WS is down and `whisperLiveAutoStart=true`, DigiRig attempts:
+```bash
+systemctl --user start whisperlive.service
+```
+
+## 5) Set callsign + policy
 ```bash
 openclaw config set channels.digirig.tx.callsign "W6RGC/AI"
 openclaw config set channels.digirig.tx.policy "proactive"   # proactive | direct-only
 openclaw config set channels.digirig.tx.aliases "Overlord,Lord,Seven,7"
 ```
 
-## 5) Latency-focused RX defaults (recommended)
+## 6) Latency-focused RX defaults (recommended)
 ```bash
 openclaw config set channels.digirig.rx.maxSilenceMs 1000
 openclaw config set channels.digirig.rx.busyHoldMs 800
@@ -66,12 +99,18 @@ openclaw config set channels.digirig.rx.maxRecordMs 120000
 openclaw config set channels.digirig.rx.preRollMs 300
 ```
 
-## 6) Restart gateway
+## 7) Restart gateway
 ```bash
 openclaw gateway restart
 ```
 
-## 7) On-air test
+## 8) First-run checklist (green state)
+- `systemctl --user is-enabled whisperlive.service` → `enabled`
+- `systemctl --user is-active whisperlive.service` → `active`
+- `ss -ltn | grep 28080` shows a listener
+- `/digirig doctor` reports service active/enabled and listener present
+
+## 9) On-air test
 Transmit:
 > “Overlord, this is Rich W6RGC. What is 2 plus 2?”
 
@@ -94,6 +133,16 @@ You should hear a spoken response and see RX/TX lines in:
 /digirig calibrate
 # then:
 /digirig calibrate result
+```
+
+### Doctor check (WhisperLive + listener)
+```bash
+/digirig doctor
+```
+
+### Setup helper (auto-detect likely devices)
+```bash
+/digirig setup
 ```
 
 ---
@@ -120,4 +169,10 @@ ss -ltnp | grep 28080
 
 ## Docs
 - Design notes: `docs/DESIGN.md`
+- Smoke test checklist: `docs/SMOKE_TEST.md`
 - Implementation roadmap: `ROADMAP.md`
+
+## Self-test command
+```bash
+npm run test:smoke
+```

@@ -1,6 +1,7 @@
 import type { ChannelPlugin } from "openclaw/plugin-sdk";
 import { DEFAULT_ACCOUNT_ID, buildChannelConfigSchema } from "openclaw/plugin-sdk";
 import { Type } from "@sinclair/typebox";
+import { spawn } from "node:child_process";
 import { DigirigConfigSchema, type DigirigConfig } from "./src/config.js";
 import { DEFAULT_TX_CALLSIGN } from "./src/defaults.js";
 import { appendCallsign, createDigirigRuntime, type DigirigRuntime } from "./src/runtime.js";
@@ -133,7 +134,7 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
     if (!raw) {
       return {
         text:
-          "Usage: /digirig tx <text> | /digirig calibrate [seconds|status|result]",
+          "Usage: /digirig tx <text> | /digirig calibrate [seconds|status|result] | /digirig doctor | /digirig setup",
       };
     }
     const [cmd, ...rest] = raw.split(/\s+/);
@@ -148,6 +149,62 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
       const callsign = cfg.channels?.digirig?.tx?.callsign ?? DEFAULT_TX_CALLSIGN;
       await runtime.speak(appendCallsign(text, callsign));
       return { text: "✅ Transmitted via DigiRig" };
+    }
+
+    if (action === "doctor") {
+      const cfg = getDigirigRuntime().config.loadConfig();
+      const wsUrl = cfg.channels?.digirig?.stt?.wsUrl ?? "ws://127.0.0.1:28080";
+      const serviceName = cfg.channels?.digirig?.stt?.whisperLiveService ?? "whisperlive.service";
+      const [active, enabled, listener, audioIn, audioOut, serial] = await Promise.all([
+        runShellCapture("systemctl", ["--user", "is-active", serviceName]),
+        runShellCapture("systemctl", ["--user", "is-enabled", serviceName]),
+        runShellCapture("ss", ["-ltn"]),
+        runShellCapture("arecord", ["-l"]),
+        runShellCapture("aplay", ["-l"]),
+        runShellCapture("bash", ["-lc", "ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | head -n 1"]),
+      ]);
+      const listening = listener.stdout.includes(":28080") || listener.stdout.includes(":18080");
+      const inputDevice = detectLikelyAlsaDevice(audioIn.stdout) ?? "plughw:0,0";
+      const outputDevice = detectLikelyAlsaDevice(audioOut.stdout) ?? "plughw:0,0";
+      const pttDevice = serial.stdout.trim() || "/dev/ttyUSB0";
+      const lines = [
+        "DigiRig doctor:",
+        `- STT wsUrl: ${wsUrl}`,
+        `- WhisperLive service: ${serviceName}`,
+        `- service active: ${active.ok ? active.stdout.trim() : "no"}`,
+        `- service enabled: ${enabled.ok ? enabled.stdout.trim() : "no"}`,
+        `- STT listener present: ${listening ? "yes" : "no"}`,
+        `- detected input device: ${inputDevice}`,
+        `- detected output device: ${outputDevice}`,
+        `- detected PTT serial: ${pttDevice}`,
+        "",
+        "If needed:",
+        `systemctl --user enable --now ${serviceName}`,
+        "openclaw gateway restart",
+      ];
+      return { text: lines.join("\n") };
+    }
+
+    if (action === "setup") {
+      const audioIn = await runShellCapture("arecord", ["-l"]);
+      const audioOut = await runShellCapture("aplay", ["-l"]);
+      const serial = await runShellCapture("bash", ["-lc", "ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | head -n 1"]);
+      const inputDevice = detectLikelyAlsaDevice(audioIn.stdout) ?? "plughw:0,0";
+      const outputDevice = detectLikelyAlsaDevice(audioOut.stdout) ?? "plughw:0,0";
+      const pttDevice = serial.stdout.trim() || "/dev/ttyUSB0";
+
+      const lines = [
+        "Quick setup commands:",
+        "npm run setup:quickstart",
+        `openclaw config set channels.digirig.audio.inputDevice \"${inputDevice}\"`,
+        `openclaw config set channels.digirig.audio.outputDevice \"${outputDevice}\"`,
+        `openclaw config set channels.digirig.ptt.device \"${pttDevice}\"`,
+        "openclaw config set channels.digirig.ptt.rts true",
+        "openclaw gateway restart",
+        "",
+        "Then run: /digirig doctor",
+      ];
+      return { text: lines.join("\n") };
     }
 
     if (action === "calibrate") {
@@ -184,7 +241,7 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
 
     return {
       text:
-        "Usage: /digirig tx <text> | /digirig calibrate [seconds|status|result]",
+        "Usage: /digirig tx <text> | /digirig calibrate [seconds|status|result] | /digirig doctor | /digirig setup",
     };
   };
 
@@ -192,7 +249,7 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
   // @ts-expect-error plugin api shape is provided by OpenClaw at runtime
   api.registerCommand({
     name: "digirig",
-    description: "DigiRig commands (tx, calibrate)",
+    description: "DigiRig commands (tx, calibrate, doctor, setup)",
     acceptsArgs: true,
     requireAuth: false,
     handler: handleDigirigCommand,
@@ -242,6 +299,37 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
       return json({ ok: true, transmitted: true });
     },
   });
+}
+
+async function runShellCapture(command: string, args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string; code: number | null }> {
+  return await new Promise((resolve) => {
+    const proc = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout?.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    proc.stderr?.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    proc.on("error", (err) => {
+      resolve({ ok: false, stdout, stderr: `${stderr}${String(err)}`, code: null });
+    });
+    proc.on("exit", (code) => {
+      resolve({ ok: code === 0, stdout, stderr, code });
+    });
+  });
+}
+
+function detectLikelyAlsaDevice(output: string): string | null {
+  const lines = output.split(/\r?\n/);
+  for (const line of lines) {
+    const match = line.match(/card\s+(\d+)\s*:[^,]*,\s*device\s+(\d+)\s*:/i);
+    if (match) {
+      return `plughw:${match[1]},${match[2]}`;
+    }
+  }
+  return null;
 }
 
 export { digirigPlugin };
