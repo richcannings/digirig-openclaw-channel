@@ -49,6 +49,10 @@ aplay -l
 openclaw config set channels.digirig.audio.inputDevice "plughw:0,0"
 openclaw config set channels.digirig.audio.outputDevice "plughw:0,0"
 
+# if capture exits with `arecord exited with 1` on the same USB card,
+# use dsnoop for input to avoid capture/playback contention
+openclaw config set channels.digirig.audio.inputDevice "dsnoop:CARD=Device,DEV=0"
+
 # set PTT serial
 openclaw config set channels.digirig.ptt.device "/dev/ttyUSB0"
 openclaw config set channels.digirig.ptt.rts true
@@ -163,6 +167,12 @@ openclaw logs --plain | grep -i digirig | tail -n 80
 - Confirm STT WS listener:
 ```bash
 ss -ltnp | grep 28080
+```
+
+- Find who has the USB audio device open (for `arecord exited with 1`):
+```bash
+fuser -v /dev/snd/*
+lsof /dev/snd/* | grep -E 'pcmC[0-9]+D[0-9]+[cp]|controlC'
 ```
 
 ---
