@@ -552,6 +552,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       );
       if (responseTimeMs !== null) {
         ctx.log?.info?.(`[digirig] responseTimeMs=${responseTimeMs}`);
+        const ts = new Date().toISOString();
+        await appendTranscript(`[${ts}] METRIC: responseTimeMs=${responseTimeMs} (rxReleaseToFirstTxVoice)`);
       }
       rxBuffer = [];
       rxStartAt = 0;
