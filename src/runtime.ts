@@ -133,6 +133,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
   let transcriber: Transcriber | null = null;
   let sttServerProc: ReturnType<typeof spawn> | null = null;
+  let txInProgress = false;
   let sttEnsureTimer: NodeJS.Timeout | null = null;
   let runLoopAbort: AbortController | null = null;
   let whisperAutoStartWarned = false;
@@ -252,13 +253,17 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       const trimmed = text.trim();
       await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 60000);
       await ptt.withTx(async () => {
-        const tts = await synthesizeTts(runtime, text);
-        const bytesPerMs = tts.sampleRate * 2 / 1000;
-        const audioMs = bytesPerMs > 0 ? Math.ceil(tts.audioBuffer.length / bytesPerMs) : 0;
-        const muteMs = Math.max(0, config.ptt.leadMs + config.ptt.tailMs + audioMs + 200);
-        audioMonitor.muteFor(muteMs);
+        txInProgress = true;
+        // Immediately suppress RX capture while TX is active to avoid self-transcription.
+        audioMonitor.muteFor(120000);
         await safeSetCaptureMute(true);
         try {
+          logger?.info?.(`[digirig] TTS input: ${trimmed}`);
+          const tts = await synthesizeTts(runtime, text);
+          const bytesPerMs = tts.sampleRate * 2 / 1000;
+          const audioMs = bytesPerMs > 0 ? Math.ceil(tts.audioBuffer.length / bytesPerMs) : 0;
+          const muteMs = Math.max(0, config.ptt.leadMs + config.ptt.tailMs + audioMs + 500);
+          audioMonitor.muteFor(muteMs);
           await playPcm({
             device: config.audio.outputDevice,
             sampleRate: tts.sampleRate,
@@ -267,6 +272,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           });
         } finally {
           await safeSetCaptureMute(false);
+          txInProgress = false;
         }
       });
       await logTranscript("TX", trimmed);
@@ -577,6 +583,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     });
 
     audioMonitor.on("recording-frame", (frame: Buffer) => {
+      if (txInProgress) return;
       if (!frameBytes || frame.length !== frameBytes) return;
       if (calibration && calibration.status === "running") {
         const sampleCount = Math.floor(frame.length / 2);
@@ -594,6 +601,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     });
 
     audioMonitor.on("recording-start", () => {
+      if (txInProgress) {
+        ctx.log?.info?.("[digirig] RX start ignored during TX");
+        return;
+      }
       rxFinalized = false;
       rxSessionId += 1;
       ctx.log?.info?.(`[digirig] RX session start id=${rxSessionId}`);
@@ -618,6 +629,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     });
 
     audioMonitor.on("utterance", async (utterance) => {
+      if (txInProgress) {
+        ctx.log?.info?.("[digirig] utterance ignored during TX");
+        return;
+      }
       if (rxFinalized) {
         return;
       }
