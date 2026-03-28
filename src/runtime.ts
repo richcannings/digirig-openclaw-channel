@@ -198,13 +198,15 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
               pcm: tts.audioBuffer,
             });
           } finally {
-            audioMonitor.clearMute();
+            // Mute the microphone for an additional 1500ms after the audio finishes playing
+            // to completely ignore the hardware PTT unkey "pop" and the radio's own squelch tail.
+            audioMonitor.muteFor(1500);
           }
         });
         await logTranscript("TX", trimmed);
       } catch (err) {
         logger?.error?.(`[digirig] TX sequence failed: ${String(err)}`);
-        audioMonitor.clearMute();
+        audioMonitor.muteFor(1500);
       } finally {
         txInProgress = false;
       }
