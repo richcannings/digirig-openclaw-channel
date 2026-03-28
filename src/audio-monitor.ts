@@ -8,6 +8,7 @@ export type AudioMonitorConfig = {
   frameMs: number;
   preRollMs: number;
   energyThreshold: number;
+  carrierSenseThreshold: number;
   energyLogIntervalMs: number;
   minSpeechMs: number;
   maxSilenceMs: number;
@@ -131,7 +132,7 @@ export class AudioMonitor extends EventEmitter {
         this.energyLogSum += energy;
       }
 
-      if (energy >= this.config.energyThreshold) {
+      if (energy >= this.config.carrierSenseThreshold) {
         this.lastActiveAt = Date.now();
       }
 
@@ -163,7 +164,10 @@ export class AudioMonitor extends EventEmitter {
         this.emit("recording-frame", frame);
         this.utteranceBuffers.push(frame);
         this.utteranceMs += this.config.frameMs;
-        if (energy < this.config.energyThreshold) {
+        
+        // Use carrierSenseThreshold instead of energyThreshold to maintain recording
+        // (Allows the operator to pause/breathe while keeping the PTT down)
+        if (energy < this.config.carrierSenseThreshold) {
           this.silenceMs += this.config.frameMs;
         } else {
           this.silenceMs = 0;

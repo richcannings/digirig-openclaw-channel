@@ -15,6 +15,7 @@ import {
   DEFAULT_RX_PRE_ROLL_MS,
   DEFAULT_RX_START_COOLDOWN_MS,
   DEFAULT_RX_ENERGY_LOG_INTERVAL_MS,
+  DEFAULT_RX_CARRIER_SENSE_THRESHOLD,
   DEFAULT_TX_CALLSIGN,
   DEFAULT_TX_POLICY,
   DEFAULT_TX_ALIASES,
@@ -52,6 +53,7 @@ const DigirigRxSchema = z
     maxRecordMs: z.number().int().min(1000).default(DEFAULT_RX_MAX_RECORD_MS),
     busyHoldMs: z.number().int().min(50).default(DEFAULT_RX_BUSY_HOLD_MS),
     startCooldownMs: z.number().int().min(0).default(DEFAULT_RX_START_COOLDOWN_MS),
+    carrierSenseThreshold: z.number().min(0).default(DEFAULT_RX_CARRIER_SENSE_THRESHOLD),
   })
   .default({});
 

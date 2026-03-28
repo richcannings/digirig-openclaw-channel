@@ -122,6 +122,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     frameMs: config.rx.frameMs,
     preRollMs: config.rx.preRollMs,
     energyThreshold: config.rx.energyThreshold,
+    carrierSenseThreshold: config.rx.carrierSenseThreshold,
     energyLogIntervalMs: config.rx.energyLogIntervalMs,
     minSpeechMs: config.rx.minSpeechMs,
     maxSilenceMs: config.rx.maxSilenceMs,
