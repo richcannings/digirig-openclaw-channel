@@ -157,9 +157,23 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let txInProgress = false;
   let runLoopAbort: AbortController | null = null;
 
-  const appendTranscript = async (line: string) => {
+  const logEvent = async (data: { type: string; [key: string]: any }) => {
+    const ts = new Date().toISOString();
+    let summary = data.summary || "";
+    if (!summary) {
+      if (data.type === "RX" || data.type === "TX") {
+        summary = `${data.type}: ${data.text ?? ""}`;
+      } else if (data.type === "METRIC") {
+        const metrics = Object.entries(data)
+          .filter(([k]) => k !== "type" && k !== "summary" && k !== "sessionId")
+          .map(([k, v]) => `${k}=${typeof v === "number" ? v.toFixed(0) : JSON.stringify(v)}`)
+          .join(" ");
+        summary = `METRIC: ${metrics}`;
+      }
+    }
+    const entry = { summary, ts, ...data };
     await fs.mkdir(logDir, { recursive: true });
-    await fs.appendFile(logPath, `${line}\n`);
+    await fs.appendFile(logPath, JSON.stringify(entry) + "\n");
   };
 
   let rxSessionId = 0;
@@ -168,10 +182,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let lastRxSilenceMs = 0;
   let lastRxDurationMs = 0;
 
-  const logTranscript = async (speaker: "RX" | "TX", text: string) => {
+  const logTranscript = async (speaker: "RX" | "TX", text: string, sessionId?: number) => {
     if (!text.trim()) return;
-    const ts = new Date().toISOString();
-    await appendTranscript(`[${ts}] ${speaker}: ${text.trim()}`);
+    await logEvent({ type: speaker, text: text.trim(), sessionId });
   };
 
   const speak = async (
@@ -298,7 +311,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
         if (!text.trim()) return;
 
-        await logTranscript("RX", text);
+        await logTranscript("RX", text, currentSessionId);
         updateStatus({ lastInboundAt: Date.now() });
 
         const cfg = runtime.config.loadConfig();
@@ -380,11 +393,11 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           totalRxToDoneMs: rxEndAt ? dispatchEndAt - rxEndAt : null,
         };
         ctx.log?.info?.(`[digirig] dispatch reply complete (counts=${JSON.stringify(counts)} timing=${JSON.stringify(timing)})`);
-        
-        if (responseTimeMs !== null) {
-          const ts = new Date().toISOString();
-          await appendTranscript(`[${ts}] METRIC: responseTimeMs=${responseTimeMs}`);
-        }
+        await logEvent({
+          type: "METRIC",
+          sessionId: currentSessionId,
+          ...timing,
+        });
       } catch (err) {
         ctx.log?.error?.(`[digirig] utterance processing error: ${String(err)}`);
       }
