@@ -277,6 +277,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           sampleRate: utterance.sampleRate ?? config.audio.sampleRate,
           log: ctx.log,
           command: typeof localCfg.command === "string" ? localCfg.command : "whisper",
+          // For powerful hardware (e.g. RTX 3060+), consider "medium.en" or "large-v3" for high accuracy over RF noise.
           model: typeof localCfg.model === "string" ? localCfg.model : "base",
           language: typeof (config.stt as any)?.language === "string" ? (config.stt as any).language : "en",
         });

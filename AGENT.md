@@ -18,6 +18,7 @@ We migrated *away* from real-time streaming (WhisperLive WebSockets) because hal
 
 ## Key Configuration (OpenClaw Global Config)
 - `channels.digirig.audio.inputDevice`: Must wrap dsnoop in a plug interface to fix hardware samplerate inconsistencies (e.g., `plug:"dsnoop:CARD=Device,DEV=0"`).
+- `channels.digirig.stt.localWhisper.model`: Defaults to `base`, but `medium.en` or `large-v3` is highly recommended for systems with a dedicated GPU (e.g. RTX 3060) to correctly handle ham radio static and parse callsigns.
 - `channels.digirig.rx.maxSilenceMs`: Set around 4000ms to ensure the operator has completely finished their transmission before we execute STT.
 - `channels.digirig.ptt.device`: The TTY device for the DigiRig (usually `/dev/ttyUSB0`).
 

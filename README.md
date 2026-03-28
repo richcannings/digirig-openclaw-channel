@@ -54,7 +54,8 @@ We use a robust batch processing method that waits for you to finish speaking, t
 
 ```bash
 openclaw config set channels.digirig.stt.localWhisper.command "/home/richc/.openclaw/venv/whisper-live/bin/whisper"
-openclaw config set channels.digirig.stt.localWhisper.model "base"
+# For basic Pi setups use "base" or "small.en". For powerful desktops (RTX 3060+), use "medium.en" or "large-v3" to handle heavy RF noise correctly.
+openclaw config set channels.digirig.stt.localWhisper.model "medium.en"
 ```
 
 ## 4) Set callsign + policy
