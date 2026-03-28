@@ -246,7 +246,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       });
     };
 
-    audioMonitor.on("log", (msg) => ctx.log?.debug?.(`[digirig] ${msg}`));
+    audioMonitor.on("log", (msg) => ctx.log?.info?.(`[digirig] ${msg}`));
     audioMonitor.on("error", (err) => {
       ctx.log?.error?.(`[digirig] ${String(err)}`);
       updateStatus({ lastError: String(err) });
@@ -258,7 +258,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         return;
       }
       rxSessionId += 1;
-      ctx.log?.info?.(`[digirig] RX session start id=${rxSessionId}`);
+      ctx.log?.info?.(`[digirig] RX session start id=${rxSessionId} (energy=${evt.energy?.toFixed(4) ?? "?"})`);
       updateStatus({ lastEventAt: Date.now() });
     });
 
