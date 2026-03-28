@@ -1,4 +1,4 @@
-import { createReplyPrefixOptions } from "openclaw/plugin-sdk";
+import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-runtime";
 
 export function createRadioContextPayload(
   runtime: any,
@@ -63,12 +63,19 @@ export async function dispatchRadioReply(params: {
   log: any;
 }) {
   const { runtime, cfg, route, ctxPayload, deliver, log } = params;
-  const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
-    cfg,
-    agentId: route.agentId,
-    channel: "digirig",
-    accountId: route.accountId,
-  });
+  let prefixOptions: any = {};
+  let onModelSelected: any = undefined;
+  if (typeof createReplyPrefixOptions === "function") {
+    const opts = createReplyPrefixOptions({
+      cfg,
+      agentId: route.agentId,
+      channel: "digirig",
+      accountId: route.accountId,
+    });
+    onModelSelected = opts.onModelSelected;
+    const { onModelSelected: _, ...rest } = opts;
+    prefixOptions = rest;
+  }
 
   return runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
     ctx: ctxPayload,
@@ -82,7 +89,7 @@ export async function dispatchRadioReply(params: {
     replyOptions: {
       onModelSelected,
       onAgentRunStart: (runId: string) => log?.info?.(`[digirig] agent run start: ${runId}`),
-      disableBlockStreaming: true,
+      disableBlockStreaming: false,
     },
   });
 }

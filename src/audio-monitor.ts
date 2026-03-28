@@ -108,6 +108,8 @@ export class AudioMonitor extends EventEmitter {
     return Date.now() - this.lastActiveAt < this.config.busyHoldMs;
   }
 
+  clearMute(): void { this.mutedUntil = 0; }
+
   muteFor(ms: number): void {
     this.mutedUntil = Math.max(this.mutedUntil, Date.now() + Math.max(0, ms));
   }
@@ -120,6 +122,9 @@ export class AudioMonitor extends EventEmitter {
     for (let offset = 0; offset + frameBytes <= chunk.length; offset += frameBytes) {
       const frame = chunk.subarray(offset, offset + frameBytes);
       const energy = computeRms(frame);
+      if (energy > 0.0001) {
+        this.emit("log", `frame energy=${energy.toFixed(6)}`);
+      }
       this.emit("energy", energy);
       if (this.config.energyLogIntervalMs > 0) {
         this.energyLogSamples += 1;

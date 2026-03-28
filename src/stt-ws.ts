@@ -95,12 +95,14 @@ export class WhisperLiveClient {
 
   async waitForIdle(idleMs: number): Promise<void> {
     const start = Date.now();
-    while (Date.now() - start < idleMs) {
-      if (!this.lastSegmentAt) {
-        await WhisperLiveClient.delay(50);
-        continue;
+    const timeout = 30000; // 30s hard timeout
+    while (Date.now() - start < timeout) {
+      const now = Date.now();
+      if (this.lastSegmentAt && now - this.lastSegmentAt >= idleMs) {
+        return;
       }
-      if (Date.now() - this.lastSegmentAt >= idleMs) {
+      if (!this.lastSegmentAt && now - start >= idleMs) {
+        // Waited for idleMs without any segments arriving at all
         return;
       }
       await WhisperLiveClient.delay(50);
@@ -140,13 +142,15 @@ export class WhisperLiveClient {
       }
       const segments = payload?.segments;
       if (Array.isArray(segments)) {
-        const text = segments
-          .map((seg: any) => String(seg?.text ?? "").trim())
-          .filter(Boolean)
-          .join(" ")
-          .trim();
-        if (text) {
-          this.latestText = text;
+        let fullText = "";
+        for (const seg of segments) {
+          const text = String(seg?.text ?? "").trim();
+          if (text) {
+            fullText += (fullText ? " " : "") + text;
+          }
+        }
+        if (fullText && fullText !== this.latestText) {
+          this.latestText = fullText;
           this.lastSegmentAt = Date.now();
         }
       }

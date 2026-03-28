@@ -10,8 +10,8 @@ export class WhisperLiveTranscriber implements Transcriber {
         url: params.wsUrl,
         model: "Systran/faster-whisper-medium.en",
         task: "transcribe",
-        useVad: false,
-        sendLastNSegments: 10,
+        useVad: true,
+        sendLastNSegments: 25,
       },
       params.log,
     );

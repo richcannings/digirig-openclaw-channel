@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ChannelGatewayStartContext } from "openclaw/plugin-sdk";
+import { type ChannelGatewayContext as ChannelGatewayStartContext } from "openclaw/plugin-sdk/channel-runtime";
 import { createRadioContextPayload, dispatchRadioReply, recordInboundSession } from "./channel-core.js";
 import { getDigirigRuntime } from "./state.js";
 import type { DigirigConfig } from "./config.js";
@@ -11,6 +11,35 @@ import { PttController } from "./ptt.js";
 import { WhisperLiveTranscriber } from "./whisperlive-transcriber.js";
 import type { Transcriber } from "./transcriber.js";
 import { playPcm, synthesizeTts } from "./tts.js";
+
+const normalizeEchoText = (input: string): string =>
+  input
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\b(w6rgc|w6r|rgc|ai|over|clear|seven|7|overlord)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const levenshtein = (a: string, b: string): number => {
+  const alen = a.length;
+  const blen = b.length;
+  if (!alen) return blen;
+  if (!blen) return alen;
+  const dp = Array.from({ length: alen + 1 }, () => new Array(blen + 1).fill(0));
+  for (let i = 0; i <= alen; i += 1) dp[i][0] = i;
+  for (let j = 0; j <= blen; j += 1) dp[0][j] = j;
+  for (let i = 1; i <= alen; i += 1) {
+    for (let j = 1; j <= blen; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost,
+      );
+    }
+  }
+  return dp[alen][blen];
+};
 
 export function appendCallsign(text: string, callsign?: string): string {
   const trimmed = text.trim();
@@ -39,12 +68,39 @@ function isDirectCall(text: string, callsign?: string, aliases: string[] = []): 
   const needles = [callsign, ...aliases].filter(Boolean) as string[];
   if (!needles.length) return false;
   const textBare = upper.replace(/[^A-Z0-9]/g, "");
+
   return needles.some((needle) => {
     const call = needle.toUpperCase();
     if (upper.includes(call)) return true;
+
+    // Handle ham radio suffixes (e.g., W6RGC/AI should match W6RGC)
+    if (call.includes("/")) {
+      const parts = call.split("/");
+      for (const part of parts) {
+        if (part.length >= 3 && upper.includes(part)) return true;
+      }
+    }
+
     const callBare = call.replace(/[^A-Z0-9]/g, "");
     return callBare.length > 0 && textBare.includes(callBare);
   });
+}
+
+function isLikelyWakeWordOnly(text: string, callsign?: string, aliases: string[] = []): boolean {
+  const cleaned = text.toLowerCase().replace(/[^a-z0-9\s/]/g, " ").trim();
+  if (!cleaned) return false;
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (words.length > 8) return false;
+
+  const wakeWords = new Set(
+    [callsign, ...aliases]
+      .filter(Boolean)
+      .flatMap((s) => String(s).toLowerCase().split(/[^a-z0-9/]+/).filter(Boolean)),
+  );
+  if (!wakeWords.size) return false;
+
+  const nonWake = words.filter((w) => !wakeWords.has(w));
+  return nonWake.length === 0;
 }
 
 
@@ -80,6 +136,14 @@ function formatRadioReply(text: string, maxWords = 300): string {
   return words.slice(0, maxWords).join(" ").trim();
 }
 
+function isSpeakableStreamingReply(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length >= 8) return true;
+  return /[.!?]\s*$/.test(t);
+}
+
 function normalizeSttText(text: string): string {
   const trimmed = text.trim();
   if (!trimmed) return "";
@@ -87,11 +151,28 @@ function normalizeSttText(text: string): string {
   if (lower === "[blank_audio]" || lower === "(blank audio)") return "";
   if (/\bbeep\b/i.test(trimmed)) return "";
   if (/^\s*[\[(].*[\])]\s*$/.test(trimmed)) return "";
+  // Drop punctuation-only / symbol-only garbage (e.g. ".\n.\n.").
+  if (!/[a-z0-9]/i.test(trimmed)) return "";
+
+  const tokens = trimmed
+    .toLowerCase()
+    .replace(/[^a-z0-9\s']/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  // Suppress classic WhisperLive loop hallucinations (very low lexical variety).
+  if (tokens.length >= 10) {
+    const unique = new Set(tokens).size;
+    const diversity = unique / tokens.length;
+    if (diversity < 0.3) {
+      return "";
+    }
+  }
 
   // Drop stray 1–3 character prefix fragments (e.g., "GC.") when followed by a sentence.
-  const tokens = trimmed.split(/\s+/);
-  if (tokens.length > 1 && tokens[0].length <= 3) {
-    const remainder = tokens.slice(1).join(" ");
+  const rawTokens = trimmed.split(/\s+/);
+  if (rawTokens.length > 1 && rawTokens[0].length <= 3) {
+    const remainder = rawTokens.slice(1).join(" ");
     if (remainder.length >= 12) {
       return remainder.trim();
     }
@@ -127,7 +208,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let started = false;
   let outboundQueue: Promise<void> = Promise.resolve();
   const logDir = join(homedir(), ".openclaw", "logs");
-  const logDate = new Date().toISOString().slice(0, 10);
+  const logDate = getLocalDateStamp();
   const logPath = join(logDir, `digirig-${logDate}.log`);
   let logger: ChannelGatewayStartContext<DigirigConfig>["log"] | null = null;
 
@@ -173,6 +254,12 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let rxSessionId = 0;
   let lastRxEndAt = 0;
   let lastRxEndReason: string | null = null;
+  let lastRxSilenceMs = 0;
+  let lastRxDurationMs = 0;
+  let lastRxText = "";
+  let lastTxText = "";
+  let lastRxAt = 0;
+  let lastTxAt = 0;
   let rxChunks: string[] = [];
 
   const logTranscript = async (speaker: "RX" | "TX", text: string) => {
@@ -230,7 +317,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     }, durationMs);
   };
 
-  const speak = async (text: string) => {
+  const speak = async (
+    text: string,
+    hooks?: { onPttKeyed?: (atMs: number) => void; onAudioStart?: (atMs: number) => void },
+  ) => {
     if (!text.trim()) {
       return;
     }
@@ -250,32 +340,44 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     };
 
     outboundQueue = outboundQueue.then(async () => {
-      const trimmed = text.trim();
-      await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 60000);
-      await ptt.withTx(async () => {
-        txInProgress = true;
-        // Immediately suppress RX capture while TX is active to avoid self-transcription.
-        audioMonitor.muteFor(120000);
-        await safeSetCaptureMute(true);
-        try {
-          logger?.info?.(`[digirig] TTS input: ${trimmed}`);
-          const tts = await synthesizeTts(runtime, text);
-          const bytesPerMs = tts.sampleRate * 2 / 1000;
-          const audioMs = bytesPerMs > 0 ? Math.ceil(tts.audioBuffer.length / bytesPerMs) : 0;
-          const muteMs = Math.max(0, config.ptt.leadMs + config.ptt.tailMs + audioMs + 500);
-          audioMonitor.muteFor(muteMs);
-          await playPcm({
-            device: config.audio.outputDevice,
-            sampleRate: tts.sampleRate,
-            channels: 1,
-            pcm: tts.audioBuffer,
-          });
-        } finally {
-          await safeSetCaptureMute(false);
-          txInProgress = false;
-        }
-      });
-      await logTranscript("TX", trimmed);
+      try {
+        const trimmed = text.trim();
+        lastTxText = trimmed;
+        lastTxAt = Date.now();
+        await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 60000);
+        await ptt.withTx(async () => {
+          hooks?.onPttKeyed?.(Date.now());
+          txInProgress = true;
+          // Immediately suppress RX capture while TX is active to avoid self-transcription.
+          audioMonitor.muteFor(120000);
+          await safeSetCaptureMute(true);
+          try {
+            logger?.info?.(`[digirig] TTS input: ${trimmed}`);
+            const tts = await synthesizeTts(runtime, text);
+            const bytesPerMs = tts.sampleRate * 2 / 1000;
+            const audioMs = bytesPerMs > 0 ? Math.ceil(tts.audioBuffer.length / bytesPerMs) : 0;
+            const muteMs = Math.max(0, config.ptt.leadMs + config.ptt.tailMs + audioMs + 500);
+            audioMonitor.clearMute();
+            audioMonitor.muteFor(muteMs);
+            hooks?.onAudioStart?.(Date.now());
+            await playPcm({
+              device: config.audio.outputDevice,
+              sampleRate: tts.sampleRate,
+              channels: 1,
+              pcm: tts.audioBuffer,
+            });
+          } finally {
+            await safeSetCaptureMute(false);
+            txInProgress = false;
+            audioMonitor.clearMute();
+          }
+        });
+        await logTranscript("TX", trimmed);
+      } catch (err) {
+        logger?.error?.(`[digirig] TX sequence failed (caught to prevent queue poison): ${String(err)}`);
+        audioMonitor.clearMute();
+        txInProgress = false;
+      }
     });
     await outboundQueue;
   };
@@ -379,12 +481,21 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     }
     started = true;
     logger = ctx.log ?? null;
+
+    const captureMute = getCaptureMuteConfig(config.audio.inputDevice);
+    if (captureMute) {
+      try {
+        await setCaptureMute(captureMute, false);
+        ctx.log?.info?.(`[digirig] ensured capture device is unmuted (control: ${captureMute.control})`);
+      } catch (err) {
+        ctx.log?.warn?.(`[digirig] failed to unmute capture device: ${String(err)}`);
+      }
+    }
+
     await ensureConfiguredSttServer(ctx.log);
-    await ensureWhisperLiveWs(ctx.log);
     if (sttEnsureTimer) clearInterval(sttEnsureTimer);
     sttEnsureTimer = setInterval(() => {
       void ensureConfiguredSttServer(ctx.log);
-      void ensureWhisperLiveWs(ctx.log);
     }, 15000);
     runLoopAbort = new AbortController();
 
@@ -417,6 +528,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     });
     // lastRxEndAt is tracked at the runtime scope
     let sttInFlight = false;
+    let lastSttStartAt = 0;
+    let lastSttEndAt = 0;
     const wsUrl = (config.stt.wsUrl ?? "").trim();
     const frameBytes = Math.floor(
       (config.audio.sampleRate * 1 * 2 * config.rx.frameMs) / 1000,
@@ -437,144 +550,202 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
     const finalizeRx = async () => {
       if (rxFinalized) return;
-      if (sttInFlight) {
-        ctx.log?.info?.(`[digirig] finalizeRx delayed; STT in flight session=${rxSessionId}`);
-        scheduleFinalizeRx();
-        return;
-      }
-      ctx.log?.info?.(`[digirig] finalizeRx session=${rxSessionId} reason=${lastRxEndReason ?? 'unknown'} bufferChunks=${rxBuffer.length} rxChunks=${rxChunks.length} `);
-      const chunkText = normalizeSttText(rxBuffer.join(" "));
-      if (!chunkText) {
-        rxBuffer = [];
-        if (rxChunks.length === 0) rxStartAt = 0;
-        return;
-      }
+      rxFinalized = true;
 
-      if (lastRxEndReason === "maxRecord") {
-        if (chunkText) {
-          rxChunks.push(chunkText);
+      try {
+        if (sttInFlight) {
+          rxFinalized = false;
+          ctx.log?.info?.(`[digirig] finalizeRx delayed; STT in flight session=${rxSessionId}`);
+          scheduleFinalizeRx();
+          return;
+        }
+        ctx.log?.info?.(`[digirig] finalizeRx session=${rxSessionId} reason=${lastRxEndReason ?? 'unknown'} bufferChunks=${rxBuffer.length} rxChunks=${rxChunks.length} `);
+        const chunkText = normalizeSttText(rxBuffer.join(" "));
+        if (!chunkText) {
+          rxBuffer = [];
+          if (rxChunks.length === 0) rxStartAt = 0;
+          return;
+        }
+
+        const text = normalizeSttText([...rxChunks, chunkText].join(" "));
+        rxChunks = [];
+
+        // Deduplication: Drop duplicate RX lines within a short window.
+        if (
+          lastRxText &&
+          normalizeEchoText(text) === normalizeEchoText(lastRxText) &&
+          Date.now() - lastRxAt < 5000
+        ) {
+          ctx.log?.info?.("[digirig] RX dropped (duplicate)");
+          rxBuffer = [];
+          rxStartAt = 0;
+          return;
+        }
+
+        // Echo Suppression: Drop RX that matches our last TX within 15s.
+        if (lastTxText && Date.now() - lastTxAt < 15000) {
+          const a = normalizeEchoText(text);
+          const b = normalizeEchoText(lastTxText);
+          if (a && b) {
+            const dist = levenshtein(a, b);
+            const maxLen = Math.max(a.length, b.length) || 1;
+            const similarity = 1 - dist / maxLen;
+            if (similarity >= 0.85) {
+              ctx.log?.info?.(`[digirig] RX dropped (echo similarity=${similarity.toFixed(2)})`);
+              rxBuffer = [];
+              rxStartAt = 0;
+              return;
+            }
+          }
+        }
+
+        lastRxText = text;
+        lastRxAt = Date.now();
+
+        await logTranscript("RX", text);
+        if (!text.trim()) {
+          rxBuffer = [];
+          rxStartAt = 0;
+          return;
+        }
+        updateStatus({ lastInboundAt: Date.now() });
+
+        const cfg = runtime.config.loadConfig();
+        const routeStartAt = Date.now();
+        const route = runtime.channel.routing.resolveAgentRoute({
+          cfg,
+          channel: "digirig",
+          accountId: "default",
+          peer: {
+            kind: "direct",
+            id: "radio",
+          },
+        });
+        const routeEndAt = Date.now();
+
+        const policy = config.tx.policy ?? "direct-only";
+        const aliasList = parseAliases(config.tx.aliases);
+        const direct = isDirectCall(text, config.tx.callsign, aliasList);
+        ctx.log?.info?.(
+          `[digirig] finalize routing: direct=${direct} policy=${policy} aliases=${aliasList.join(",")} routeSession=${route.sessionKey ?? "?"}`,
+        );
+        if (policy === "direct-only" && !direct) {
+          rxBuffer = [];
+          rxStartAt = 0;
+          return;
+        }
+
+        const radioPrompt = "Radio mode: respond with 300 words or less for on-air voices, keep phrasing clear for speech playback, and preserve callsigns when heard. Do not explain your plans or ask for permission; just execute the command or provide the answer immediately. Do not mention policy, tools, or refusal; just answer or acknowledge.";
+        const ctxPayload = createRadioContextPayload(runtime, cfg, route, text, radioPrompt);
+
+        await recordInboundSession(runtime, cfg, route, ctxPayload, ctx.log);
+
+        const dispatchStartAt = Date.now();
+        const rxEndAtSnapshot = lastRxEndAt;
+        let firstPttAt = 0;
+        let firstAudioAt = 0;
+        let speakMs = 0;
+        let didSpeak = false;
+        ctx.log?.info?.(`[digirig] dispatch reply start session=${rxSessionId} direct=${direct} routeSession=${route.sessionKey ?? "?"}`);
+        const dispatchResult = await dispatchRadioReply({
+          runtime,
+          cfg,
+          route,
+          ctxPayload,
+          log: ctx.log,
+          deliver: async (payload) => {
+            if (!payload.text) {
+              return;
+            }
+            if (ctxPayload.OriginatingChannel !== "digirig" || ctxPayload.SessionKey !== "digirig:radio") {
+              ctx.log?.info?.("[digirig] deliver suppressed (non-radio session)");
+              return;
+            }
+            if (didSpeak) {
+              ctx.log?.info?.("[digirig] duplicate deliver suppressed");
+              return;
+            }
+            const shortReply = formatRadioReply(payload.text);
+            if (!shortReply) {
+              return;
+            }
+            if (!isSpeakableStreamingReply(shortReply)) {
+              ctx.log?.debug?.("[digirig] streaming chunk buffered; waiting for a speakable sentence");
+              return;
+            }
+            const txText = appendCallsign(shortReply, config.tx.callsign);
+            ctx.log?.info?.(`[digirig] reply deliver: ${txText}`);
+            didSpeak = true;
+            const speakStartAt = Date.now();
+            await speak(txText, {
+              onPttKeyed: (atMs) => {
+                if (!firstPttAt) firstPttAt = atMs;
+              },
+              onAudioStart: (atMs) => {
+                if (!firstAudioAt) firstAudioAt = atMs;
+              },
+            });
+            speakMs = Date.now() - speakStartAt;
+          },
+        });
+        const dispatchEndAt = Date.now();
+        const counts = dispatchResult?.counts ?? {};
+        const lastReplyLen = dispatchResult?.finalText?.length ?? 0;
+        ctx.log?.info?.(`[digirig] dispatch result counts=${JSON.stringify(counts)} finalLen=${lastReplyLen}`);
+        const rxEndAt = rxEndAtSnapshot || null;
+        const responseTimeMs = firstPttAt && rxEndAt ? Math.max(0, firstPttAt - rxEndAt) : null;
+        const rxToSttStartMs = rxEndAt && lastSttStartAt ? Math.max(0, lastSttStartAt - rxEndAt) : null;
+        const sttMs = lastSttStartAt && lastSttEndAt ? Math.max(0, lastSttEndAt - lastSttStartAt) : null;
+        const estimatedReleaseToFirstTxMs =
+          firstPttAt && rxEndAt ? Math.max(0, firstPttAt - (rxEndAt - Math.max(0, lastRxSilenceMs || 0))) : null;
+        const estimatedReleaseToFirstAudioMs =
+          firstAudioAt && rxEndAt ? Math.max(0, firstAudioAt - (rxEndAt - Math.max(0, lastRxSilenceMs || 0))) : null;
+        const timing = {
+          rxDurationMs: lastRxDurationMs || null,
+          rxSilenceMs: lastRxSilenceMs || null,
+          rxToSttStartMs,
+          sttMs,
+          routeMs: routeEndAt - routeStartAt,
+          dispatchMs: dispatchEndAt - dispatchStartAt,
+          rxToFirstTxMs: firstPttAt && rxEndAt ? Math.max(0, firstPttAt - rxEndAt) : null,
+          rxPttToFirstAudioMs: firstPttAt && firstAudioAt ? Math.max(0, firstAudioAt - firstPttAt) : null,
+          estimatedReleaseToFirstTxMs,
+          estimatedReleaseToFirstAudioMs,
+          responseTimeMs,
+          speakMs: speakMs || null,
+          totalRxToDoneMs: rxEndAt ? dispatchEndAt - rxEndAt : null,
+          totalUtteranceToDoneMs: rxStartAt ? dispatchEndAt - rxStartAt : null,
+        };
+        ctx.log?.info?.(
+          `[digirig] dispatch reply complete (counts=${JSON.stringify(counts)} timing=${JSON.stringify(timing)})`,
+        );
+        if (responseTimeMs !== null) {
+          const est = timing.estimatedReleaseToFirstTxMs;
+          ctx.log?.info?.(`[digirig] responseTimeMs=${responseTimeMs}${est !== null ? ` estimatedReleaseToFirstTxMs=${est}` : ""}`);
+          const ts = new Date().toISOString();
+          await appendTranscript(
+            `[${ts}] METRIC: responseTimeMs=${responseTimeMs}${est !== null ? ` estimatedReleaseToFirstTxMs=${est}` : ""} (rxEndToFirstTx / approxPttReleaseToFirstTx)`,
+          );
         }
         rxBuffer = [];
-        rxFinalized = true;
-        return;
-      }
-
-      const text = normalizeSttText([...rxChunks, chunkText].join(" "));
-      rxChunks = [];
-      await logTranscript("RX", text);
-      if (!text.trim()) {
-        rxBuffer = [];
         rxStartAt = 0;
-        rxFinalized = true;
-        return;
+      } catch (err) {
+        ctx.log?.error?.(`[digirig] finalizeRx error: ${String(err)}`);
+      } finally {
+        rxFinalized = false;
       }
-      updateStatus({ lastInboundAt: Date.now() });
-
-      const cfg = runtime.config.loadConfig();
-      const routeStartAt = Date.now();
-      const route = runtime.channel.routing.resolveAgentRoute({
-        cfg,
-        channel: "digirig",
-        accountId: "default",
-        peer: {
-          kind: "direct",
-          id: "radio",
-        },
-      });
-      const routeEndAt = Date.now();
-
-      const policy = config.tx.policy ?? "direct-only";
-      const aliasList = parseAliases(config.tx.aliases);
-      const direct = isDirectCall(text, config.tx.callsign, aliasList);
-      ctx.log?.info?.(
-        `[digirig] finalize routing: direct=${direct} policy=${policy} aliases=${aliasList.join(",")} routeSession=${route.sessionKey ?? "?"}`,
-      );
-      if (policy === "direct-only" && !direct) {
-        rxBuffer = [];
-        rxStartAt = 0;
-        rxFinalized = true;
-        return;
-      }
-
-      const radioPrompt = "Radio mode: respond with 300 words or less for on-air voices, keep phrasing clear for speech playback, and preserve callsigns when heard. Do not mention policy, tools, or refusal; just answer or acknowledge.";
-      const ctxPayload = createRadioContextPayload(runtime, cfg, route, text, radioPrompt);
-
-      await recordInboundSession(runtime, cfg, route, ctxPayload, ctx.log);
-
-      const dispatchStartAt = Date.now();
-      const rxEndAtSnapshot = lastRxEndAt;
-      let firstTxAt = 0;
-      let speakMs = 0;
-      let didSpeak = false;
-      ctx.log?.info?.(`[digirig] dispatch reply start session=${rxSessionId} direct=${direct} routeSession=${route.sessionKey ?? "?"}`);
-      const dispatchResult = await dispatchRadioReply({
-        runtime,
-        cfg,
-        route,
-        ctxPayload,
-        log: ctx.log,
-        deliver: async (payload) => {
-          if (!payload.text) {
-            return;
-          }
-          if (ctxPayload.OriginatingChannel !== "digirig" || ctxPayload.SessionKey !== "digirig:radio") {
-            ctx.log?.info?.("[digirig] deliver suppressed (non-radio session)");
-            return;
-          }
-          const shortReply = formatRadioReply(payload.text);
-          if (!shortReply) {
-            return;
-          }
-          const txText = appendCallsign(shortReply, config.tx.callsign);
-          ctx.log?.info?.(`[digirig] reply deliver: ${txText}`);
-          didSpeak = true;
-          if (!firstTxAt) {
-            firstTxAt = Date.now();
-          }
-          const speakStartAt = Date.now();
-          await speak(txText);
-          speakMs = Date.now() - speakStartAt;
-        },
-      });
-      const dispatchEndAt = Date.now();
-      const counts = dispatchResult?.counts ?? {};
-      const lastReplyLen = dispatchResult?.finalText?.length ?? 0;
-      ctx.log?.info?.(`[digirig] dispatch result counts=${JSON.stringify(counts)} finalLen=${lastReplyLen}`);
-      const rxEndAt = rxEndAtSnapshot || null;
-      const responseTimeMs = firstTxAt && rxEndAt ? Math.max(0, firstTxAt - rxEndAt) : null;
-      const timing = {
-        rxToSttStartMs: null,
-        sttMs: null,
-        routeMs: routeEndAt - routeStartAt,
-        dispatchMs: dispatchEndAt - dispatchStartAt,
-        rxToFirstTxMs: firstTxAt && rxEndAt ? Math.max(0, firstTxAt - rxEndAt) : null,
-        responseTimeMs,
-        speakMs: speakMs || null,
-        totalRxToDoneMs: rxEndAt ? dispatchEndAt - rxEndAt : null,
-        totalUtteranceToDoneMs: rxStartAt ? dispatchEndAt - rxStartAt : null,
-      };
-      ctx.log?.info?.(
-        `[digirig] dispatch reply complete (counts=${JSON.stringify(counts)} timing=${JSON.stringify(timing)})`,
-      );
-      if (responseTimeMs !== null) {
-        ctx.log?.info?.(`[digirig] responseTimeMs=${responseTimeMs}`);
-        const ts = new Date().toISOString();
-        await appendTranscript(`[${ts}] METRIC: responseTimeMs=${responseTimeMs} (rxReleaseToFirstTxVoice)`);
-      }
-      rxBuffer = [];
-      rxStartAt = 0;
-      rxFinalized = true;
     };
 
     audioMonitor.on("recording-end", (evt) => {
       lastRxEndAt = Date.now();
       const reason = evt?.reason ?? "?";
       lastRxEndReason = reason;
-      const silenceMs = evt?.silenceMs ?? "?";
+      const silenceMs = Number(evt?.silenceMs ?? 0);
+      const durationMs = Number(evt?.durationMs ?? 0);
+      lastRxSilenceMs = Number.isFinite(silenceMs) ? silenceMs : 0;
+      lastRxDurationMs = Number.isFinite(durationMs) ? durationMs : 0;
       ctx.log?.info?.(`[digirig] RX end (session=${rxSessionId}, durationMs=${evt?.durationMs ?? '?'}, silenceMs=${silenceMs}, reason=${reason})`);
-      if (transcriber) {
-        transcriber.endTurn();
-      }
+      
       if (reason === "maxRecord") {
         void finalizeRx();
         return;
@@ -595,9 +766,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           calibration.samples += 1;
         }
       }
-      if (transcriber) {
-        transcriber.pushFrame(frame);
-      }
     });
 
     audioMonitor.on("recording-start", () => {
@@ -615,17 +783,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       if (!rxBuffer.length && rxChunks.length === 0) {
         rxStartAt = Date.now();
       }
-      if (!wsUrl) {
-        ctx.log?.error?.("[digirig] stt.wsUrl is required for WS-only mode");
-        return;
-      }
-      if (!transcriber) {
-        transcriber = new WhisperLiveTranscriber({ wsUrl, log: ctx.log });
-      }
-      void transcriber.connect().catch((err) =>
-        ctx.log?.error?.(`[digirig] WhisperLive connect failed: ${String(err)}`),
-      );
-      transcriber.startTurn();
     });
 
     audioMonitor.on("utterance", async (utterance) => {
@@ -640,36 +797,23 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       try {
         const rxEndAt = lastRxEndAt || Date.now();
         const sttStartAt = Date.now();
+        lastSttStartAt = sttStartAt;
         ctx.log?.info?.(
           `[digirig] STT start (rxToSttStartMs=${sttStartAt - rxEndAt})`,
         );
 
-        let text = "";
-        if (transcriber) {
-          await transcriber.waitForResult(350);
-          text = normalizeSttText(transcriber.getText() || "");
-          if (!text.trim()) {
-            await transcriber.waitForResult(850);
-            text = normalizeSttText(transcriber.getText() || "");
-          }
-        }
-
-        if (!text.trim()) {
-          const localCfg = (config.stt as any)?.localWhisper ?? {};
-          text = normalizeSttText(
-            await transcribeWithLocalWhisper({
-              pcm16: utterance as Buffer,
-              sampleRate: config.audio.sampleRate,
-              log: ctx.log,
-              command: typeof localCfg.command === "string" ? localCfg.command : "whisper",
-              model: typeof localCfg.model === "string" ? localCfg.model : "base",
-              language: typeof (config.stt as any)?.language === "string" ? (config.stt as any).language : "en",
-            }),
-          );
-          if (text) {
-            ctx.log?.info?.("[digirig] STT source: local whisper fallback");
-          }
-        }
+        const localCfg = (config.stt as any)?.localWhisper ?? {};
+        const text = normalizeSttText(
+          await transcribeWithLocalWhisper({
+            pcm16: utterance.pcm,
+            sampleRate: utterance.sampleRate ?? config.audio.sampleRate,
+            log: ctx.log,
+            command: typeof localCfg.command === "string" ? localCfg.command : "whisper",
+            model: typeof localCfg.model === "string" ? localCfg.model : "base",
+            language: typeof (config.stt as any)?.language === "string" ? (config.stt as any).language : "en",
+          }),
+        );
+        ctx.log?.info?.("[digirig] STT source: local whisper batch");
 
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
         if (!text.trim()) {
@@ -680,24 +824,12 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           return;
         }
 
-        const lastFragment = rxBuffer[rxBuffer.length - 1];
-        if (lastFragment) {
-          const lowerLast = lastFragment.toLowerCase();
-          const lowerText = normalizedRx.toLowerCase();
-          if (
-            lowerText === lowerLast ||
-            lowerLast.endsWith(lowerText) ||
-            lowerText.endsWith(lowerLast)
-          ) {
-            return;
-          }
-        }
-
-        rxBuffer.push(normalizedRx);
-        return;
+        // WhisperLive text is cumulative; overwrite rxBuffer to avoid duplication.
+        rxBuffer = [normalizedRx];
       } catch (err) {
         ctx.log?.error?.(`[digirig] inbound error: ${String(err)}`);
       } finally {
+        lastSttEndAt = Date.now();
         sttInFlight = false;
       }
     });
@@ -922,4 +1054,11 @@ async function waitForClearChannel(
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getLocalDateStamp(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import type { PluginRuntime } from "openclaw/plugin-sdk";
+import type { PluginRuntime } from "openclaw/plugin-sdk/core";
 
 export async function synthesizeTts(runtime: PluginRuntime, text: string): Promise<{
   audioBuffer: Buffer;

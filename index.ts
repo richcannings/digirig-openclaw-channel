@@ -1,5 +1,5 @@
-import type { ChannelPlugin } from "openclaw/plugin-sdk";
-import { DEFAULT_ACCOUNT_ID, buildChannelConfigSchema } from "openclaw/plugin-sdk";
+import type { ChannelPlugin } from "openclaw/plugin-sdk/core";
+import { DEFAULT_ACCOUNT_ID, buildChannelConfigSchema } from "openclaw/plugin-sdk/core";
 import { Type } from "@sinclair/typebox";
 import { spawn } from "node:child_process";
 import { DigirigConfigSchema, type DigirigConfig } from "./src/config.js";
@@ -323,13 +323,25 @@ async function runShellCapture(command: string, args: string[]): Promise<{ ok: b
 
 function detectLikelyAlsaDevice(output: string): string | null {
   const lines = output.split(/\r?\n/);
+  const devices: Array<{ card: number; dev: number; line: string; score: number }> = [];
+
   for (const line of lines) {
     const match = line.match(/card\s+(\d+)\s*:[^,]*,\s*device\s+(\d+)\s*:/i);
-    if (match) {
-      return `plughw:${match[1]},${match[2]}`;
-    }
+    if (!match) continue;
+    const card = Number(match[1]);
+    const dev = Number(match[2]);
+    const lower = line.toLowerCase();
+    let score = 0;
+    if (lower.includes("usb pnp sound device")) score += 100;
+    if (lower.includes("usb audio")) score += 80;
+    if (lower.includes("device")) score += 30;
+    devices.push({ card, dev, line, score });
   }
-  return null;
+
+  if (!devices.length) return null;
+  devices.sort((a, b) => b.score - a.score || a.card - b.card || a.dev - b.dev);
+  const best = devices[0];
+  return `plughw:${best.card},${best.dev}`;
 }
 
 export { digirigPlugin };
