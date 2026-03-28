@@ -3,8 +3,8 @@
 ## Status (now)
 - Stable on-air RX/TX loop
 - Slimmed plugin surface
-- Transcriber abstraction in place
-- Practical latency around ~5s with current model + TTS path
+- Reliable batch-based STT transcription using local Whisper
+- Practical latency around ~6s with current model + TTS path (4s silence wait + 2s STT)
 
 ## Completed
 - Runtime restart-safety fixes
@@ -12,7 +12,7 @@
 - Removed nonessential features (UI hints, extra fallback branches, duplicate logs)
 - Policy simplified to `proactive` and `direct-only`
 - `channel-core.ts` extraction for reusable dispatch flow
-- `Transcriber` interface + WhisperLive adapter
+- Replaced buggy WhisperLive streaming with robust batch local Whisper
 - RX timing micro-optimizations and sane defaults
 
 ## Next Milestones
@@ -41,17 +41,13 @@
   2) full answer
 - Goal: improve perceived responsiveness while preserving full answer quality
 
-### M4: STT backend portability
-- Implement second `Transcriber` adapter (non-Whisper path)
-- runtime remains unchanged thanks to interface boundary
-
-### M5: Upstream/shareable helpers
+### M4: Upstream/shareable helpers
 - Identify reusable portions of `channel-core.ts`
 - upstream to shared OpenClaw utilities where appropriate
 
 ## Success Metrics
 - Reliability: no restart-loop regressions in soak tests
-- Latency: maintain or improve ~5s median PTT-release to response carrier
+- Latency: maintain or improve ~6s median PTT-release to response carrier
 - Size: continued net reduction in runtime complexity and branching
 - Operability: straightforward setup from README on a fresh host
 - Safety invariants: PTT always unkeys, restart behavior remains deterministic

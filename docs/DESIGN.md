@@ -10,9 +10,9 @@ A minimal, reliable OpenClaw ham-radio channel with low RX-end → TX-start late
 
 ## Current Architecture
 ### Kept in plugin (RF-specific)
-- ALSA capture framing (`audio-monitor.ts`)
+- ALSA capture framing and VAD (`audio-monitor.ts`)
 - PTT RTS control (`ptt.ts`)
-- STT transport adapter (`whisperlive-transcriber.ts` implementing `Transcriber`)
+- STT batch processing (`transcribeWithLocalWhisper` in `runtime.ts`)
 - PCM playback/TTS output glue (`tts.ts`)
 
 ### Reused / extracted channel-core logic
@@ -32,13 +32,12 @@ Implemented in: `src/channel-core.ts`
    - removed identity alias auto-infer
    - removed value-and-wait policy mode
    - removed closing/fallback special-casing and raw/verbose transcript noise
-3. **STT abstraction**
-   - added `Transcriber` interface
-   - WhisperLive moved behind adapter
+3. **STT Simplification**
+   - removed complex `Transcriber` WebSocket streaming
+   - migrated entirely to reliable, single-shot batch processing with local Whisper
 4. **Latency tuning**
-   - reduced finalize deferral
-   - adaptive STT wait (fast pass + fallback pass)
-   - practical RX settings tuned for ~5s observed turnaround
+   - increased `maxSilenceMs` to 4000ms to eliminate stuttering and mid-sentence cutoffs
+   - practical RX settings tuned for ~6s observed turnaround
 
 ## Policy Modes (current)
 - `proactive`
@@ -48,14 +47,15 @@ Implemented in: `src/channel-core.ts`
 - RX/TX transcript remains in `~/.openclaw/logs/digirig-YYYY-MM-DD.log`
 - `/digirig tx` and `/digirig calibrate` are preserved
 - PTT unkey is protected in `finally`
+- Microphone is explicitly unmuted (`amixer set Mic cap`) on startup to prevent `arecord` failures
 
 ## Known Practical Latency Budget
-Observed ~5s is typically dominated by:
+Observed ~6s is typically dominated by:
+- 4s `maxSilenceMs` to ensure the operator has finished speaking
+- local `whisper` batch execution (1-2s)
 - model + dispatch latency
 - TTS generation
 - PTT lead/audio start
-
-RX silence gate tuning improved response significantly from prior 11–12s behavior.
 
 ## Planning Notes
 Execution sequencing and future milestones are tracked in `ROADMAP.md` to keep this document focused on current architecture and invariants.

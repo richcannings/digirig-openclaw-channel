@@ -1,19 +1,15 @@
 # DigiRig Smoke Test
 
-Use this after updates to confirm WhisperLive + DigiRig still work.
+Use this after updates to confirm the local Whisper batch pipeline + DigiRig still work.
 
-## 1) Service + listener
+## 1) Microphone Check
 
 ```bash
-systemctl --user is-enabled whisperlive.service
-systemctl --user is-active whisperlive.service
-ss -ltn | grep 28080
+amixer -c Device sget Mic
 ```
 
 Expected:
-- enabled
-- active
-- listener on 127.0.0.1:28080 (or 0.0.0.0:28080)
+- Capture channel should indicate `[on]` and a non-zero volume.
 
 ## 2) Plugin doctor
 
@@ -22,9 +18,7 @@ Expected:
 ```
 
 Expected:
-- service active: active
-- service enabled: enabled
-- STT listener present: yes
+- Provides configuration overview and device statuses.
 
 ## 3) Gateway state
 
@@ -32,6 +26,8 @@ Expected:
 openclaw status
 openclaw gateway status
 ```
+Expected:
+- The DigiRig channel should say "ON" and "configured".
 
 ## 4) On-air test phrase
 
@@ -39,13 +35,17 @@ Say this over RF:
 
 > Overlord, this is Rich W6RGC. Give me a radio check and tell me what 2 plus 2 is.
 
+*Wait for about 4-5 seconds of silence.*
+
 Expected:
-- RX line appears in `~/.openclaw/logs/digirig-YYYY-MM-DD.log`
-- Short spoken TX reply is heard
+- RX line appears in `~/.openclaw/logs/digirig-YYYY-MM-DD.log` containing exactly what you said.
+- Short spoken TX reply is heard shortly after.
 
 ## 5) Failure recovery
 
+If you encounter `arecord exited with 1`, check the ALSA configuration:
+
 ```bash
-npm run setup:quickstart
+openclaw config set channels.digirig.audio.inputDevice 'plug:"dsnoop:CARD=Device,DEV=0"'
 openclaw gateway restart
 ```
