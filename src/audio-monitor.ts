@@ -24,6 +24,10 @@ export type AudioUtterance = {
   startAt: number;
   endAt: number;
   reason: string;
+  rms: number;
+  peak: number;
+  rmsDb: number;
+  peakDb: number;
 };
 
 export class AudioMonitor extends EventEmitter {
@@ -222,9 +226,22 @@ export class AudioMonitor extends EventEmitter {
       return;
     }
 
-    const rms = computeRms(pcm.subarray(0, Math.min(pcm.length, 32000)));
-    if (rms < this.config.energyThreshold * 0.5) {
-      this.emit("log", `discarded low-energy clip (rms=${rms.toFixed(4)})`);
+    let sumSquares = 0;
+    let peak = 0;
+    const sampleCount = Math.floor(pcm.length / 2);
+    for (let i = 0; i < sampleCount; i++) {
+      const sample = pcm.readInt16LE(i * 2) / 32768;
+      sumSquares += sample * sample;
+      const abs = Math.abs(sample);
+      if (abs > peak) peak = abs;
+    }
+    const fullRms = Math.sqrt(sumSquares / Math.max(1, sampleCount));
+    const rmsDb = 20 * Math.log10(fullRms || 1e-9);
+    const peakDb = 20 * Math.log10(peak || 1e-9);
+
+    const initialRms = computeRms(pcm.subarray(0, Math.min(pcm.length, 32000)));
+    if (initialRms < this.config.energyThreshold * 0.5) {
+      this.emit("log", `discarded low-energy clip (initialRms=${initialRms.toFixed(4)})`);
       return;
     }
 
@@ -235,6 +252,10 @@ export class AudioMonitor extends EventEmitter {
       startAt: Date.now(),
       endAt: Date.now(),
       reason,
+      rms: fullRms,
+      peak,
+      rmsDb,
+      peakDb,
     } as AudioUtterance);
   }
 

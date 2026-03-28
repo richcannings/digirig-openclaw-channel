@@ -182,9 +182,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let lastRxSilenceMs = 0;
   let lastRxDurationMs = 0;
 
-  const logTranscript = async (speaker: "RX" | "TX", text: string, sessionId?: number) => {
+  const logTranscript = async (speaker: "RX" | "TX", text: string, sessionId?: number, extraProps?: Record<string, any>) => {
     if (!text.trim()) return;
-    await logEvent({ type: speaker, text: text.trim(), sessionId });
+    await logEvent({ type: speaker, text: text.trim(), sessionId, ...(extraProps || {}) });
   };
 
   const speak = async (
@@ -311,7 +311,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
         if (!text.trim()) return;
 
-        await logTranscript("RX", text, currentSessionId);
+        await logTranscript("RX", text, currentSessionId, {
+          rmsDb: Number(utterance.rmsDb?.toFixed(1)),
+          peakDb: Number(utterance.peakDb?.toFixed(1)),
+        });
         updateStatus({ lastInboundAt: Date.now() });
 
         const cfg = runtime.config.loadConfig();
@@ -335,7 +338,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           return;
         }
 
-        const radioPrompt = "Radio mode: respond with 300 words or less for on-air voices, keep phrasing clear for speech playback, and preserve callsigns when heard. Do not explain your plans or ask for permission; just execute the command or provide the answer immediately. Do not mention policy, tools, or refusal; just answer or acknowledge.";
+        const signalReport = utterance.rmsDb ? `\n[System Data: incoming audio signal strength was RMS ${utterance.rmsDb.toFixed(1)} dBFS, Peak ${utterance.peakDb.toFixed(1)} dBFS. A signal around -20 is loud, -40 is soft, and below -50 is very weak/noisy.]` : "";
+        const radioPrompt = `Radio mode: respond with 300 words or less for on-air voices, keep phrasing clear for speech playback, and preserve callsigns when heard. Do not explain your plans or ask for permission; just execute the command or provide the answer immediately. Do not mention policy, tools, or refusal; just answer or acknowledge.${signalReport}`;
         const ctxPayload = createRadioContextPayload(runtime, cfg, route, text, radioPrompt);
 
         await recordInboundSession(runtime, cfg, route, ctxPayload, ctx.log);
