@@ -171,7 +171,11 @@ export class AudioMonitor extends EventEmitter {
         this.utteranceMs += this.config.frameMs;
         
         // Use carrierSenseThreshold instead of energyThreshold to maintain recording
-        // (Allows the operator to pause/breathe while keeping the PTT down)
+        // (Allows the operator to pause/breathe while keeping the PTT down).
+        // NOTE: If mid-sentence dropouts still occur because the radio's open-squelch static
+        // is exceptionally quiet, `carrierSenseThreshold` can be configured to absolute `0.0`.
+        // This will force the system to act as a raw PTT tracker, only closing the recording
+        // when the hardware USB soundcard reports absolute digital zero (squelch fully closed).
         if (energy < this.config.carrierSenseThreshold) {
           this.silenceMs += this.config.frameMs;
         } else {
