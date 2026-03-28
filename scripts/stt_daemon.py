@@ -30,7 +30,8 @@ class WhisperHandler(http.server.BaseHTTPRequestHandler):
                         f.write(audio_data)
                     
                     # Run inference. The model is already hot in VRAM!
-                    result = model.transcribe(path, fp16=False, language="en")
+                    # fp16=True takes advantage of RTX 3060 Tensor Cores for massive speedups
+                    result = model.transcribe(path, fp16=True, language="en")
                     
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/json')
