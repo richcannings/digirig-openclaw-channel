@@ -71,7 +71,7 @@ openclaw config set channels.digirig.tx.aliases "Overlord,Lord,Seven,7"
 ## 5) Latency-focused RX defaults (recommended)
 ```bash
 openclaw config set channels.digirig.rx.energyThreshold 0.1         # Trigger recording when you speak
-openclaw config set channels.digirig.rx.carrierSenseThreshold 0.0001 # Keep recording alive while squelch is open
+openclaw config set channels.digirig.rx.carrierSenseThreshold 0.0008 # Keep recording alive while squelch is open
 openclaw config set channels.digirig.rx.maxSilenceMs 500            # Snappy 500ms timeout after squelch closes
 openclaw config set channels.digirig.rx.busyHoldMs 800
 openclaw config set channels.digirig.rx.minSpeechMs 500
