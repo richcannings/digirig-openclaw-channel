@@ -262,9 +262,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       ctx.log?.info?.(`[digirig] RX end (session=${rxSessionId}, durationMs=${durationMs}, silenceMs=${silenceMs}, reason=${lastRxEndReason})`);
     });
 
-    audioMonitor.on("utterance", async (utterance) => {
-      if (txInProgress) {
-        ctx.log?.info?.("[digirig] utterance ignored during TX");
+    audioMonitor.on("utterance", async (utterance: any) => {
+      if (txInProgress || lastRxEndReason === "tx") {
+        ctx.log?.info?.("[digirig] utterance ignored (aborted by TX mute)");
         return;
       }
       

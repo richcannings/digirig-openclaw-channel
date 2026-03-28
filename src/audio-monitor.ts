@@ -138,7 +138,7 @@ export class AudioMonitor extends EventEmitter {
 
       if (Date.now() < this.mutedUntil) {
         if (this.recording) {
-          this.finishUtterance("maxRecord");
+          this.finishUtterance("tx");
         }
         continue;
       }
@@ -198,7 +198,7 @@ export class AudioMonitor extends EventEmitter {
     }
   }
 
-  private finishUtterance(reason: "silence" | "maxRecord"): void {
+  private finishUtterance(reason: "silence" | "maxRecord" | "tx"): void {
     const pcm = Buffer.concat(this.utteranceBuffers);
     this.recording = false;
     this.lastEndAt = Date.now();
