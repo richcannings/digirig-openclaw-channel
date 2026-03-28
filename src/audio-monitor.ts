@@ -23,6 +23,7 @@ export type AudioUtterance = {
   channels: number;
   startAt: number;
   endAt: number;
+  reason: string;
 };
 
 export class AudioMonitor extends EventEmitter {
@@ -228,6 +229,7 @@ export class AudioMonitor extends EventEmitter {
       channels: this.config.channels,
       startAt: Date.now(),
       endAt: Date.now(),
+      reason,
     } as AudioUtterance);
   }
 

@@ -263,7 +263,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     });
 
     audioMonitor.on("utterance", async (utterance: any) => {
-      if (txInProgress || lastRxEndReason === "tx") {
+      if (txInProgress || utterance.reason === "tx" || lastRxEndReason === "tx") {
         ctx.log?.info?.("[digirig] utterance ignored (aborted by TX mute)");
         return;
       }
