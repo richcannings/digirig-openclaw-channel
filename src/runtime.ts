@@ -9,6 +9,7 @@ import type { DigirigConfig } from "./config.js";
 import { AudioMonitor } from "./audio-monitor.js";
 import { PttController } from "./ptt.js";
 import { playPcm, synthesizeTts } from "./tts.js";
+import { HAM_RADIO_PROMPT } from "./prompt.js";
 
 export function appendCallsign(text: string, callsign?: string): string {
   const trimmed = text.trim();
@@ -339,7 +340,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         }
 
         const signalReport = utterance.rmsDb ? `\n[System Data: incoming audio signal strength was RMS ${utterance.rmsDb.toFixed(1)} dBFS, Peak ${utterance.peakDb.toFixed(1)} dBFS. A signal around -20 is loud, -40 is soft, and below -50 is very weak/noisy.]` : "";
-        const radioPrompt = `Radio mode: respond with 300 words or less for on-air voices, keep phrasing clear for speech playback, and preserve callsigns when heard. Do not explain your plans or ask for permission; just execute the command or provide the answer immediately. Do not mention policy, tools, or refusal; just answer or acknowledge.${signalReport}`;
+        const radioPrompt = `${HAM_RADIO_PROMPT}\n\n${signalReport}`;
         const ctxPayload = createRadioContextPayload(runtime, cfg, route, text, radioPrompt);
 
         await recordInboundSession(runtime, cfg, route, ctxPayload, ctx.log);
