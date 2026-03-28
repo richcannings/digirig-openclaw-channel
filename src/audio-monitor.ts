@@ -137,6 +137,9 @@ export class AudioMonitor extends EventEmitter {
       }
 
       if (Date.now() < this.mutedUntil) {
+        if (this.recording) {
+          this.finishUtterance("maxRecord");
+        }
         continue;
       }
 
