@@ -89,6 +89,14 @@ function normalizeSttText(text: string): string {
   if (/^\s*[\[(].*[\])]\s*$/.test(trimmed)) return "";
   if (!/[a-z0-9]/i.test(trimmed)) return "";
 
+  // Filter out common OpenAI Whisper static hallucinations
+  const strippedLower = lower.replace(/[^a-z0-9\s]/g, "").trim();
+  if (
+    ["you", "thank you", "thanks for watching", "thank you for watching"].includes(strippedLower)
+  ) {
+    return "";
+  }
+
   const tokens = trimmed
     .toLowerCase()
     .replace(/[^a-z0-9\s']/g, " ")
