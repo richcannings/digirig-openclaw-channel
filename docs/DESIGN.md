@@ -35,9 +35,11 @@ Implemented in: `src/channel-core.ts`
 3. **STT Simplification**
    - removed complex `Transcriber` WebSocket streaming
    - migrated entirely to reliable, single-shot batch processing with local Whisper
-4. **Latency tuning**
-   - increased `maxSilenceMs` to 4000ms to eliminate stuttering and mid-sentence cutoffs
-   - practical RX settings tuned for ~6s observed turnaround
+4. **Latency tuning & VAD**
+   - implemented a dual-tier VAD system separating `energyThreshold` (speech) and `carrierSenseThreshold` (static).
+   - reduced `maxSilenceMs` to 500ms, as the system now instantly recognizes a hardware squelch drop.
+   - synthesized audio is generated *before* keying the PTT relay, avoiding dead-air transmissions.
+   - practical RX settings tuned for ~2-3s observed turnaround from PTT-unkey to reply.
 
 ## Policy Modes (current)
 - `proactive`
@@ -50,11 +52,11 @@ Implemented in: `src/channel-core.ts`
 - Microphone is explicitly unmuted (`amixer set Mic cap`) on startup to prevent `arecord` failures
 
 ## Known Practical Latency Budget
-Observed ~6s is typically dominated by:
-- 4s `maxSilenceMs` to ensure the operator has finished speaking
-- local `whisper` batch execution (1-2s)
+Observed ~2-3s is typically dominated by:
+- local `whisper` batch execution (0.5-2s depending on model)
+- TTS generation (1s)
+- 0.5s `maxSilenceMs` to ensure the squelch is fully dropped
 - model + dispatch latency
-- TTS generation
 - PTT lead/audio start
 
 ## Planning Notes

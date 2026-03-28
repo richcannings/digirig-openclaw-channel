@@ -35,7 +35,7 @@ Say this over RF:
 
 > Overlord, this is Rich W6RGC. Give me a radio check and tell me what 2 plus 2 is.
 
-*Wait for about 4-5 seconds of silence.*
+*Unkey the radio and wait about 1-2 seconds.*
 
 Expected:
 - RX line appears in `~/.openclaw/logs/digirig-YYYY-MM-DD.log` containing exactly what you said.

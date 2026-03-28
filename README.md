@@ -67,7 +67,9 @@ openclaw config set channels.digirig.tx.aliases "Overlord,Lord,Seven,7"
 
 ## 5) Latency-focused RX defaults (recommended)
 ```bash
-openclaw config set channels.digirig.rx.maxSilenceMs 4000  # 4s wait before transcribing
+openclaw config set channels.digirig.rx.energyThreshold 0.1         # Trigger recording when you speak
+openclaw config set channels.digirig.rx.carrierSenseThreshold 0.005 # Keep recording alive while squelch is open
+openclaw config set channels.digirig.rx.maxSilenceMs 500            # Snappy 500ms timeout after squelch closes
 openclaw config set channels.digirig.rx.busyHoldMs 800
 openclaw config set channels.digirig.rx.minSpeechMs 500
 openclaw config set channels.digirig.rx.maxRecordMs 120000
@@ -83,7 +85,7 @@ openclaw gateway restart
 Transmit:
 > “Overlord, this is Rich W6RGC. What is 2 plus 2?”
 
-*Wait ~4 seconds for the silence timeout, then ~2 seconds for the batch transcription.* You should hear a spoken response and see RX/TX lines in:
+*Unkey the radio and wait ~500ms for the silence timeout, then ~2 seconds for the batch transcription.* You should hear a spoken response and see RX/TX lines in:
 ```bash
 ~/.openclaw/logs/digirig-YYYY-MM-DD.log
 ```
