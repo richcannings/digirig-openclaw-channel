@@ -19,7 +19,7 @@ We migrated *away* from real-time streaming (WhisperLive WebSockets) because hal
 ## Key Configuration (OpenClaw Global Config)
 - `channels.digirig.audio.inputDevice`: Must wrap dsnoop in a plug interface to fix hardware samplerate inconsistencies (e.g., `plug:"dsnoop:CARD=Device,DEV=0"`).
 - `channels.digirig.stt.localWhisper.model`: Defaults to `base`, but `medium.en` or `large-v3` is highly recommended for systems with a dedicated GPU (e.g. RTX 3060) to correctly handle ham radio static and parse callsigns.
-- `channels.digirig.rx.energyThreshold` and `channels.digirig.rx.carrierSenseThreshold`: A two-tier VAD system. `energyThreshold` (e.g. 0.1) triggers the recording when the user speaks. `carrierSenseThreshold` (e.g. 0.005) keeps the channel busy and recording alive as long as the radio's squelch is open (even if the user pauses).
+- `channels.digirig.rx.energyThreshold` and `channels.digirig.rx.carrierSenseThreshold`: A two-tier VAD system. `energyThreshold` (e.g. 0.1) triggers the recording when the user speaks. `carrierSenseThreshold` (e.g. 0.0015) keeps the channel busy and recording alive as long as the radio's squelch is open (even if the user pauses).
 - `channels.digirig.rx.maxSilenceMs`: Because the system tracks the actual squelch drop, this can be set very low (e.g. 500ms) for snappy, sub-second STT processing when the user unkeys.
 - `channels.digirig.ptt.device`: The TTY device for the DigiRig (usually `/dev/ttyUSB0`).
 
