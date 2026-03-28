@@ -134,7 +134,7 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
     if (!raw) {
       return {
         text:
-          "Usage: /digirig tx <text> | /digirig calibrate [seconds|status|result] | /digirig doctor | /digirig setup",
+          "Usage: /digirig tx <text> | /digirig doctor | /digirig setup",
       };
     }
     const [cmd, ...rest] = raw.split(/\s+/);
@@ -207,41 +207,9 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
       return { text: lines.join("\n") };
     }
 
-    if (action === "calibrate") {
-      const runtime = getRuntime();
-      const sub = (rest[0] ?? "").toLowerCase();
-      if (sub === "status") {
-        return { text: `Calibration status: ${runtime.getCalibrationStatus()}` };
-      }
-      if (sub === "result") {
-        const result = runtime.getCalibrationResult();
-        if (!result) {
-          return { text: "No calibration result yet. Run /digirig calibrate" };
-        }
-        return {
-          text:
-            "Calibration result:\n" +
-            `- RMS: ${result.rmsDb.toFixed(1)} dB\n` +
-            `- Peak: ${result.peakDb.toFixed(1)} dB\n` +
-            `- Samples: ${result.samples}\n` +
-            "\nTarget: RMS around -24 to -12 dB, Peak below -3 dB.",
-        };
-      }
-
-      const durationSec = Number.parseInt(sub || "8", 10);
-      const seconds = Number.isFinite(durationSec) ? durationSec : 8;
-      const durationMs = Math.max(3000, Math.min(seconds * 1000, 30000));
-      runtime.startCalibration(durationMs);
-      return {
-        text:
-          `Calibration started for ${Math.round(durationMs / 1000)}s. Speak NOW with a steady count (one-two-three...).\n` +
-          "When done, run: /digirig calibrate result",
-      };
-    }
-
     return {
       text:
-        "Usage: /digirig tx <text> | /digirig calibrate [seconds|status|result] | /digirig doctor | /digirig setup",
+        "Usage: /digirig tx <text> | /digirig doctor | /digirig setup",
     };
   };
 
@@ -249,7 +217,7 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
   // @ts-expect-error plugin api shape is provided by OpenClaw at runtime
   api.registerCommand({
     name: "digirig",
-    description: "DigiRig commands (tx, calibrate, doctor, setup)",
+    description: "DigiRig commands (tx, doctor, setup)",
     acceptsArgs: true,
     requireAuth: false,
     handler: handleDigirigCommand,
