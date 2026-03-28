@@ -18,9 +18,6 @@ import {
   DEFAULT_TX_CALLSIGN,
   DEFAULT_TX_POLICY,
   DEFAULT_TX_ALIASES,
-  DEFAULT_STT_WS_URL,
-  DEFAULT_STT_WHISPERLIVE_AUTOSTART,
-  DEFAULT_STT_WHISPERLIVE_SERVICE,
 } from "./defaults.js";
 
 const DigirigAudioSchema = z
@@ -59,13 +56,11 @@ const DigirigRxSchema = z
   .default({});
 
 const DigirigSttSchema = z.object({
-  wsUrl: z.string().min(1).default(DEFAULT_STT_WS_URL),
-  whisperLiveAutoStart: z.boolean().default(DEFAULT_STT_WHISPERLIVE_AUTOSTART),
-  whisperLiveService: z.string().min(1).default(DEFAULT_STT_WHISPERLIVE_SERVICE),
-  // Optional compatibility fields used by runtime fallbacks/auto-bootstrap.
-  streamUrl: z.string().optional(),
-  server: z.any().optional(),
-  localWhisper: z.any().optional(),
+  localWhisper: z.object({
+    command: z.string().optional(),
+    model: z.string().optional(),
+  }).optional(),
+  language: z.string().optional(),
 });
 
 const DigirigTxSchema = z

@@ -50,11 +50,11 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
         },
       };
     },
-    isConfigured: (account) => Boolean(account.stt?.wsUrl?.trim()),
+    isConfigured: (account) => true,
     describeAccount: (account) => ({
       accountId: DEFAULT_ACCOUNT_ID,
       enabled: account.enabled ?? true,
-      configured: Boolean(account.stt?.wsUrl?.trim()),
+      configured: true,
     }),
   },
   status: {
@@ -70,7 +70,7 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
     buildAccountSnapshot: ({ account, runtime }) => ({
       accountId: DEFAULT_ACCOUNT_ID,
       enabled: account.enabled ?? true,
-      configured: Boolean(account.stt?.wsUrl?.trim()),
+      configured: true,
       running: runtime?.running ?? false,
       connected: runtime?.connected ?? false,
       lastConnectedAt: runtime?.lastConnectedAt ?? null,

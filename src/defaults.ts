@@ -18,7 +18,4 @@ export const DEFAULT_RX_ENERGY_LOG_INTERVAL_MS = 1000;
 export const DEFAULT_TX_CALLSIGN = "N0CALL/AI";
 export const DEFAULT_TX_POLICY = "direct-only" as const;
 export const DEFAULT_TX_ALIASES = "Overlord,Lord,Seven,7";
-export const DEFAULT_STT_WS_URL = "ws://127.0.0.1:28080";
-export const DEFAULT_STT_WHISPERLIVE_AUTOSTART = true;
-export const DEFAULT_STT_WHISPERLIVE_SERVICE = "whisperlive.service";
 

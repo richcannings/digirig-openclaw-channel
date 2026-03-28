@@ -8,8 +8,6 @@ import { getDigirigRuntime } from "./state.js";
 import type { DigirigConfig } from "./config.js";
 import { AudioMonitor } from "./audio-monitor.js";
 import { PttController } from "./ptt.js";
-import { WhisperLiveTranscriber } from "./whisperlive-transcriber.js";
-import type { Transcriber } from "./transcriber.js";
 import { playPcm, synthesizeTts } from "./tts.js";
 
 const normalizeEchoText = (input: string): string =>
@@ -212,12 +210,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   const logPath = join(logDir, `digirig-${logDate}.log`);
   let logger: ChannelGatewayStartContext<DigirigConfig>["log"] | null = null;
 
-  let transcriber: Transcriber | null = null;
-  let sttServerProc: ReturnType<typeof spawn> | null = null;
   let txInProgress = false;
-  let sttEnsureTimer: NodeJS.Timeout | null = null;
   let runLoopAbort: AbortController | null = null;
-  let whisperAutoStartWarned = false;
 
   let calibration:
     | null
@@ -382,99 +376,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     await outboundQueue;
   };
 
-  const ensureConfiguredSttServer = async (log?: { info?: (m: string)=>void; warn?: (m: string)=>void; error?: (m: string)=>void }) => {
-    const server = (config.stt as any)?.server;
-    if (!server || typeof server !== "object") return;
-    const command = typeof server.command === "string" ? server.command.trim() : "";
-    if (!command) return;
-
-    const streamUrl = typeof (config.stt as any)?.streamUrl === "string"
-      ? (config.stt as any).streamUrl
-      : "http://127.0.0.1:18080/inference";
-
-    // If STT HTTP endpoint is already alive, no need to spawn another process.
-    if (await isHttpAlive(streamUrl, 1200)) return;
-    if (sttServerProc && !sttServerProc.killed) return;
-
-    let host = "127.0.0.1";
-    let port = "18080";
-    try {
-      const u = new URL(streamUrl);
-      host = u.hostname || host;
-      port = u.port || port;
-    } catch {}
-
-    const modelPath = typeof server.modelPath === "string" ? server.modelPath : "";
-    const argTemplate = typeof server.args === "string" ? server.args : "";
-    const args = argTemplate
-      .replaceAll("{model}", modelPath)
-      .replaceAll("{host}", host)
-      .replaceAll("{port}", port)
-      .split(/\s+/)
-      .filter(Boolean);
-
-    try {
-      sttServerProc = spawn(command, args, { stdio: "ignore", detached: false });
-      sttServerProc.once("error", (err) => {
-        log?.error?.(`[digirig] failed to start STT server: ${String(err)}`);
-        sttServerProc = null;
-      });
-      sttServerProc.on("exit", (code) => {
-        log?.warn?.(`[digirig] STT server exited (${code ?? "?"})`);
-        sttServerProc = null;
-      });
-      log?.info?.(`[digirig] ensured STT server process: ${command} ${args.join(" ")}`);
-    } catch (err) {
-      log?.error?.(`[digirig] failed to start STT server: ${String(err)}`);
-    }
-  };
-
-  const ensureWhisperLiveWs = async (log?: { info?: (m: string)=>void; warn?: (m: string)=>void; error?: (m: string)=>void }) => {
-    const wsUrl = (config.stt?.wsUrl ?? "").trim();
-    if (!wsUrl) return;
-
-    let url: URL;
-    try {
-      url = new URL(wsUrl);
-    } catch {
-      return;
-    }
-
-    const host = url.hostname;
-    const isLocalHost = host === "127.0.0.1" || host === "localhost";
-    if (!isLocalHost) return;
-
-    const port = Number(url.port || "28080");
-    if (!Number.isFinite(port) || port <= 0) return;
-
-    if (await isTcpAlive(host, port, 1200)) return;
-
-    const shouldAutoStart = (config.stt as any)?.whisperLiveAutoStart !== false;
-    if (!shouldAutoStart) return;
-
-    const serviceName = typeof (config.stt as any)?.whisperLiveService === "string"
-      ? (config.stt as any).whisperLiveService
-      : "whisperlive.service";
-
-    try {
-      await runCommand("systemctl", ["--user", "start", serviceName]);
-      const alive = await isTcpAlive(host, port, 1500);
-      if (alive) {
-        whisperAutoStartWarned = false;
-        log?.info?.(`[digirig] WhisperLive auto-started via systemd user service: ${serviceName}`);
-      } else if (!whisperAutoStartWarned) {
-        whisperAutoStartWarned = true;
-        log?.warn?.(`[digirig] WhisperLive start requested but WS is still unreachable at ${wsUrl}. Run: systemctl --user status ${serviceName}`);
-      }
-    } catch (err) {
-      if (!whisperAutoStartWarned) {
-        whisperAutoStartWarned = true;
-        log?.warn?.(`[digirig] WhisperLive auto-start failed (${serviceName}): ${String(err)}`);
-        log?.warn?.("[digirig] First-run fix: run ./scripts/setup-whisperlive-systemd.sh (from plugin repo), then openclaw gateway restart");
-      }
-    }
-  };
-
   const start = async (ctx: ChannelGatewayStartContext<DigirigConfig>) => {
     if (hardStopped || started) {
       return;
@@ -492,11 +393,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       }
     }
 
-    await ensureConfiguredSttServer(ctx.log);
-    if (sttEnsureTimer) clearInterval(sttEnsureTimer);
-    sttEnsureTimer = setInterval(() => {
-      void ensureConfiguredSttServer(ctx.log);
-    }, 15000);
     runLoopAbort = new AbortController();
 
     const updateStatus = (patch: Partial<{
@@ -893,40 +789,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   const getCalibrationResult = () => calibration?.result ?? null;
 
   return { start, stop, speak, startCalibration, getCalibrationStatus, getCalibrationResult };
-}
-
-async function isHttpAlive(url: string, timeoutMs = 1200): Promise<boolean> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { method: "GET", signal: ctrl.signal });
-    return !!res;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function isTcpAlive(host: string, port: number, timeoutMs = 1200): Promise<boolean> {
-  try {
-    const net = await import("node:net");
-    return await new Promise<boolean>((resolve) => {
-      const socket = net.createConnection({ host, port });
-      let done = false;
-      const finish = (ok: boolean) => {
-        if (done) return;
-        done = true;
-        socket.destroy();
-        resolve(ok);
-      };
-      socket.once("connect", () => finish(true));
-      socket.once("error", () => finish(false));
-      socket.setTimeout(timeoutMs, () => finish(false));
-    });
-  } catch {
-    return false;
-  }
 }
 
 async function transcribeWithLocalWhisper(params: {
