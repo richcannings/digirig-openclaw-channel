@@ -3,8 +3,10 @@
 ## Status (now)
 - Stable on-air RX/TX loop
 - Slimmed plugin surface
-- Reliable batch-based STT transcription using local Whisper
-- Practical latency around ~6s with current model + TTS path (4s silence wait + 2s STT)
+- Ultra-low latency pipeline via dual-tier VAD (0.5s timeout) and Hot-Loaded HTTP STT Daemon.
+- Practical latency around ~2-3s with `medium.en` model + TTS path
+- Ham Radio Operator Persona embedded via `src/prompt.ts`
+- Comprehensive structured JSON logging (`digirig-*.log`) for transmission metrics
 
 ## Completed
 - Runtime restart-safety fixes
@@ -13,33 +15,27 @@
 - Policy simplified to `proactive` and `direct-only`
 - `channel-core.ts` extraction for reusable dispatch flow
 - Replaced buggy WhisperLive streaming with robust batch local Whisper
-- RX timing micro-optimizations and sane defaults
+- RX timing micro-optimizations and sane defaults (0.0008 carrier sense, 500ms silence)
+- Ignored hardware PTT unkey "pops" to fix phantom hallucination loops
+- Implemented M0: On-air personality + ham-operator behavior pack (`prompt.ts`)
+- Implemented M2: Latency instrumentation (Structured JSON metrics logs)
 
-## Next Milestones
+## Next Milestones (My Prioritization)
 
-### M0 (Highest Priority): On-air personality + ham-operator behavior pack
-- Define and enforce radio persona/voice for on-air interactions.
-- Add explicit behavior guidance for:
-  - routine QSOs (call, response, brevity, sign-offs)
-  - net operations (check-ins, net control interactions, directed traffic)
-  - general ham etiquette (ID cadence, clarity, turn-taking, professional tone)
-- Encode this in prompt/policy assets and regression-test with simulated transcripts.
-- Include examples of good/bad responses for consistent operator-style behavior.
+### M1 (Highest Priority): TX Safety Interlocks & FCC Compliance
+- Max TX duration guard (e.g., auto-unkey if generating audio for > 2 minutes).
+- Duplicate-message suppression window to prevent repeat TX after retries/races.
+- Automatic Mandatory ID Cadence (e.g. periodically transmitting "W6RGC/AI" every 10 minutes during active QSOs).
 
-### M1: Policy module extraction
-- Move policy decisions from `runtime.ts` into `src/policy.ts`
-- Keep behavior unchanged
-- Add direct-only/proactive test coverage
-
-### M2: Latency instrumentation cleanup
-- Keep concise timing logs in structured logger (not transcript)
-- Add one-liner summary per turn: `rxEnd->txStart`, `dispatch`, `tts`
-
-### M3: Optional fast-ack mode
+### M2: "Fast-Ack" Mode (Perceived Latency)
 - Config flag for two-step transmit:
-  1) short immediate ack
-  2) full answer
-- Goal: improve perceived responsiveness while preserving full answer quality
+  1) Immediate tactile acknowledgement the millisecond the squelch drops (e.g. short beep, static tail, or "Copy").
+  2) Full answer transmitted 2-3 seconds later.
+- Goal: provide immediate user feedback while the STT/LLM pipeline runs in the background.
+
+### M3: Policy module extraction
+- Move policy decisions (e.g., `proactive` vs `direct-only`) from `runtime.ts` into `src/policy.ts` to shrink runtime size.
+- Keep behavior unchanged.
 
 ### M4: Upstream/shareable helpers
 - Identify reusable portions of `channel-core.ts`
@@ -47,8 +43,7 @@
 
 ## Success Metrics
 - Reliability: no restart-loop regressions in soak tests
-- Latency: maintain or improve ~6s median PTT-release to response carrier
-- Size: continued net reduction in runtime complexity and branching
+- Latency: maintain ~2s median PTT-release to response carrier
 - Operability: straightforward setup from README on a fresh host
 - Safety invariants: PTT always unkeys, restart behavior remains deterministic
 
