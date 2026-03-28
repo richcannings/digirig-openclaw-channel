@@ -52,11 +52,11 @@ Implemented in: `src/channel-core.ts`
 - Microphone is explicitly unmuted (`amixer set Mic cap`) on startup to prevent `arecord` failures
 
 ## Known Practical Latency Budget
-Observed ~2-3s is typically dominated by:
-- local `whisper` batch execution (0.5-2s depending on model)
-- TTS generation (1s)
+Observed ~1.5-2s is typically dominated by:
 - 0.5s `maxSilenceMs` to ensure the squelch is fully dropped
+- hot-loaded `whisper-daemon` HTTP execution (0.2s - 0.8s)
 - model + dispatch latency
+- TTS generation (0.5s - 1s)
 - PTT lead/audio start
 
 ## Planning Notes

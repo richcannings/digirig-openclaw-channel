@@ -49,14 +49,17 @@ openclaw config set channels.digirig.ptt.device "/dev/ttyUSB0"
 openclaw config set channels.digirig.ptt.rts true
 ```
 
-## 3) Configure STT endpoint (Local Whisper)
-We use a robust batch processing method that waits for you to finish speaking, then transcribes the whole sentence perfectly using the local Whisper CLI.
+## 3) Configure STT endpoint (Ultra-Fast Hot-Loaded Daemon)
+We use a robust batch-processing approach. To completely eliminate the 2-4 second "cold start" delay of loading the AI model for every transmission, we run a tiny Python HTTP daemon in the background that keeps the model hot in your GPU's VRAM.
 
 ```bash
-openclaw config set channels.digirig.stt.localWhisper.command "/home/richc/.openclaw/venv/whisper-live/bin/whisper"
-# For basic Pi setups use "base" or "small.en". For powerful desktops (RTX 3060+), use "medium.en" or "large-v3" to handle heavy RF noise correctly.
-openclaw config set channels.digirig.stt.localWhisper.model "medium.en"
+# This sets up the hot-loaded daemon as a background service:
+./scripts/setup-stt-daemon.sh
 ```
+
+If you don't run this script, OpenClaw will gracefully fall back to the slow, cold-start `whisper` CLI command.
+
+*(To configure which model the daemon uses, edit the `ExecStart` line in `~/.config/systemd/user/whisper-daemon.service` and run `systemctl --user daemon-reload && systemctl --user restart whisper-daemon.service`. For RTX 3060+, `medium.en` is highly recommended).*
 
 ## 4) Set callsign + policy
 ```bash

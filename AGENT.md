@@ -7,7 +7,7 @@ It allows users to communicate with their AI agents over RF (radio frequency) us
 
 ## High-Level Architecture
 1. **Audio Capture**: `src/audio-monitor.ts` constantly listens to the configured ALSA audio device. It manages Voice Activity Detection (VAD) and groups frames into discrete `utterances`.
-2. **Batch Transcription**: When an utterance ends (silence timeout met), the entire raw PCM buffer is passed to a local python `whisper` CLI process (`src/runtime.ts` -> `transcribeWithLocalWhisper`).
+2. **Batch Transcription**: When an utterance ends (silence timeout met), the raw PCM buffer is sent via HTTP POST to a **hot-loaded Python HTTP daemon** (`127.0.0.1:18088`). If the daemon is unavailable, the system gracefully falls back to executing a slow, cold-start `whisper` CLI process (`src/runtime.ts` -> `transcribeWithLocalWhisper`).
 3. **Dispatch**: The text transcription is wrapped as a chat payload and routed to the OpenClaw core agent logic (`src/channel-core.ts`).
 4. **Text-To-Speech (TTS)**: When the agent replies, OpenClaw synthesizes the text into PCM audio.
 5. **PTT & Playback**: The plugin triggers the Request-To-Send (RTS) line via the serial port (`src/ptt.ts`) to key the radio, waits for the transmitter to settle, and pipes the PCM data through `aplay` (`src/tts.ts`).

@@ -443,11 +443,6 @@ async function transcribeWithLocalWhisper(params: {
   const model = (params.model || "base").trim();
   const language = (params.language || "en").trim();
 
-  const dir = await fs.mkdtemp(join(tmpdir(), "digirig-whisper-"));
-  const wavPath = join(dir, "rx.wav");
-  const outDir = join(dir, "out");
-  await fs.mkdir(outDir, { recursive: true });
-
   const header = Buffer.alloc(44);
   const byteRate = sampleRate * 2;
   header.write("RIFF", 0);
@@ -463,7 +458,40 @@ async function transcribeWithLocalWhisper(params: {
   header.writeUInt16LE(16, 34);
   header.write("data", 36);
   header.writeUInt32LE(pcm16.length, 40);
-  await fs.writeFile(wavPath, Buffer.concat([header, pcm16]));
+  const wavBuffer = Buffer.concat([header, pcm16]);
+
+  // 1) Attempt to use the hot-loaded STT daemon (Ultra-fast, ~0.5s latency)
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000); // 10s inference timeout
+    const res = await fetch("http://127.0.0.1:18088/transcribe", {
+      method: "POST",
+      body: wavBuffer,
+      headers: { "Content-Type": "audio/wav" },
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    
+    if (res.ok) {
+      const json = await res.json() as { text?: string };
+      log?.info?.(`[digirig] STT source: hot-loaded daemon (ultra-fast)`);
+      return (json.text || "").trim();
+    }
+  } catch (err: any) {
+    // If ECONNREFUSED or aborted, the daemon isn't running. Fall back silently.
+    if (err.name !== "TypeError" && err.code !== "ECONNREFUSED") {
+      log?.warn?.(`[digirig] STT daemon failed, falling back to cold-start CLI: ${String(err)}`);
+    }
+  }
+
+  // 2) Fallback to the cold-start CLI execution (Slower, ~3s latency)
+  log?.info?.(`[digirig] STT source: local whisper CLI (cold start)`);
+  const dir = await fs.mkdtemp(join(tmpdir(), "digirig-whisper-"));
+  const wavPath = join(dir, "rx.wav");
+  const outDir = join(dir, "out");
+  await fs.mkdir(outDir, { recursive: true });
+
+  await fs.writeFile(wavPath, wavBuffer);
 
   const args = [
     wavPath,
