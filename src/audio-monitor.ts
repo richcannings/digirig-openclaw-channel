@@ -138,6 +138,7 @@ export class AudioMonitor extends EventEmitter {
       }
 
       if (Date.now() < this.mutedUntil) {
+        this.preRollFrames = [];
         if (this.recording) {
           this.finishUtterance("tx");
         }

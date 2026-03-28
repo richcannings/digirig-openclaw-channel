@@ -174,6 +174,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     if (!config.ptt.rts) return;
 
     outboundQueue = outboundQueue.then(async () => {
+      txInProgress = true;
       try {
         const trimmed = text.trim();
         logger?.info?.(`[digirig] TTS input: ${trimmed}`);
@@ -187,7 +188,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 60000);
         await ptt.withTx(async () => {
           hooks?.onPttKeyed?.(Date.now());
-          txInProgress = true;
           audioMonitor.muteFor(muteMs);
           try {
             hooks?.onAudioStart?.(Date.now());
@@ -198,7 +198,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
               pcm: tts.audioBuffer,
             });
           } finally {
-            txInProgress = false;
             audioMonitor.clearMute();
           }
         });
@@ -206,6 +205,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       } catch (err) {
         logger?.error?.(`[digirig] TX sequence failed: ${String(err)}`);
         audioMonitor.clearMute();
+      } finally {
         txInProgress = false;
       }
     });
