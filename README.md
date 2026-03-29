@@ -1,10 +1,16 @@
-# DigiRig OpenClaw Channel
+# 📻 DigiRig OpenClaw Channel
 
-Talk to OpenClaw over ham radio.
+**Turn your ham radio into a direct link to an advanced AI assistant.**
 
-This plugin provides a bridge between voice ham radio operations and OpenClaw.
+This plugin bridges the gap between analog RF and modern Large Language Models using a [DigiRig Mobile](https://digirig.net/) interface. Whether you are out in the backcountry with a handheld or sitting at your base station, your AI agent is just a PTT press away.
 
-This plugin provides:
+Building an AI for two-way radio isn't as simple as plugging a chatbot into a microphone. Analog radio is messy. This plugin is engineered specifically for the brutal realities of RF. It uses a custom **Dual-Tier Voice Activity Detector** that tracks raw analog noise floors to perfectly handle squelch tails. It masks the physical electrical pops of PTT relays, calculates real-time signal strength (RMS/Peak dBFS) for authentic on-air signal reports, and leverages a hot-loaded GPU Whisper daemon for sub-second transcription. 
+
+It doesn't just listen—it behaves like a disciplined amateur radio operator. If you want to merge the bleeding edge of AI with the original maker hobby, you are in the right place.
+
+---
+
+### Core Capabilities
 - Speech-to-text to agent to text-to-speech pipeline using a robust batch-transcription approach.
 - digirig PTT handling and VOX support 
 - Carrier detection and transmission queuing for half-duplex operation
