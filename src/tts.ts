@@ -26,8 +26,14 @@ export async function playPcm(params: {
   sampleRate: number;
   channels: number;
   pcm: Buffer;
+  signal?: AbortSignal;
 }): Promise<void> {
-  const { device, sampleRate, channels, pcm } = params;
+  const { device, sampleRate, channels, pcm, signal } = params;
+
+  if (signal?.aborted) {
+    throw new Error("playPcm aborted before start");
+  }
+
   const proc = spawn("aplay", [
     "-D",
     device,
@@ -41,13 +47,28 @@ export async function playPcm(params: {
     "raw",
   ]);
 
+  const onAbort = () => {
+    if (proc.pid) {
+      proc.kill("SIGKILL");
+    }
+  };
+
+  if (signal) {
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
+
   proc.stdin?.write(pcm);
   proc.stdin?.end();
 
   await new Promise<void>((resolve, reject) => {
     proc.on("error", reject);
     proc.on("exit", (code) => {
-      if (code === 0) {
+      if (signal) {
+        signal.removeEventListener("abort", onAbort);
+      }
+      if (signal?.aborted) {
+        reject(new Error("aplay forcefully aborted by timeout signal"));
+      } else if (code === 0) {
         resolve();
       } else {
         reject(new Error(`aplay exited with ${code ?? "unknown"}`));

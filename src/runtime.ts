@@ -207,25 +207,36 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         const audioMs = bytesPerMs > 0 ? Math.ceil(tts.audioBuffer.length / bytesPerMs) : 0;
         const muteMs = Math.max(0, config.ptt.leadMs + config.ptt.tailMs + audioMs + 500);
 
-        await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 60000);
-        await ptt.withTx(async () => {
-          hooks?.onPttKeyed?.(Date.now());
-          audioMonitor.muteFor(muteMs);
-          try {
-            hooks?.onAudioStart?.(Date.now());
-            await playPcm({
-              device: config.audio.outputDevice,
-              sampleRate: tts.sampleRate,
-              channels: 1,
-              pcm: tts.audioBuffer,
-            });
-          } finally {
-            // Mute the microphone for an additional 1500ms after the audio finishes playing
-            // to completely ignore the hardware PTT unkey "pop" and the radio's own squelch tail.
-            audioMonitor.muteFor(1500);
-          }
-        });
-        await logTranscript("TX", trimmed);
+        const txAbortController = new AbortController();
+        const maxTxTimer = setTimeout(() => {
+          logger?.error?.(`[digirig] CRITICAL: Max TX duration (${config.tx.maxTxMs}ms) exceeded. Forcefully aborting transmission to protect hardware.`);
+          txAbortController.abort();
+        }, config.tx.maxTxMs);
+
+        try {
+          await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 60000);
+          await ptt.withTx(async () => {
+            hooks?.onPttKeyed?.(Date.now());
+            audioMonitor.muteFor(muteMs);
+            try {
+              hooks?.onAudioStart?.(Date.now());
+              await playPcm({
+                device: config.audio.outputDevice,
+                sampleRate: tts.sampleRate,
+                channels: 1,
+                pcm: tts.audioBuffer,
+                signal: txAbortController.signal,
+              });
+            } finally {
+              // Mute the microphone for an additional 1500ms after the audio finishes playing
+              // to completely ignore the hardware PTT unkey "pop" and the radio's own squelch tail.
+              audioMonitor.muteFor(1500);
+            }
+          });
+          await logTranscript("TX", trimmed);
+        } finally {
+          clearTimeout(maxTxTimer);
+        }
       } catch (err) {
         logger?.error?.(`[digirig] TX sequence failed: ${String(err)}`);
         audioMonitor.muteFor(1500);

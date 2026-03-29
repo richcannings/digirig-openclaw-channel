@@ -19,9 +19,10 @@ import {
   DEFAULT_TX_CALLSIGN,
   DEFAULT_TX_POLICY,
   DEFAULT_TX_ALIASES,
-} from "./defaults.js";
+  DEFAULT_TX_MAX_DURATION_MS,
+  } from "./defaults.js";
 
-const DigirigAudioSchema = z
+  const DigirigAudioSchema = z
   .object({
     inputDevice: z.string().default(DEFAULT_AUDIO_DEVICE),
     outputDevice: z.string().default(DEFAULT_AUDIO_DEVICE),
@@ -29,16 +30,16 @@ const DigirigAudioSchema = z
   })
   .default({});
 
-const DigirigPttSchema = z
+  const DigirigPttSchema = z
   .object({
-    device: z.string().default(DEFAULT_PTT_DEVICE),
+    device: z.string().min(1).default(DEFAULT_PTT_DEVICE),
     rts: z.boolean().default(true),
     leadMs: z.number().int().min(0).default(DEFAULT_PTT_LEAD_MS),
     tailMs: z.number().int().min(0).default(DEFAULT_PTT_TAIL_MS),
   })
   .default({});
 
-const DigirigRxSchema = z
+  const DigirigRxSchema = z
   .object({
     energyThreshold: z.number().min(0).default(DEFAULT_RX_ENERGY_THRESHOLD),
     energyLogIntervalMs: z
@@ -57,21 +58,22 @@ const DigirigRxSchema = z
   })
   .default({});
 
-const DigirigSttSchema = z.object({
+  const DigirigSttSchema = z.object({
   localWhisper: z.object({
     command: z.string().optional(),
     model: z.string().optional(),
   }).optional(),
   language: z.string().optional(),
-});
+  });
 
-const DigirigTxSchema = z
+  const DigirigTxSchema = z
   .object({
     callsign: z.string().min(1).default(DEFAULT_TX_CALLSIGN),
     policy: z
       .enum(["direct-only", "proactive"])
       .default(DEFAULT_TX_POLICY),
     aliases: z.string().default(DEFAULT_TX_ALIASES),
+    maxTxMs: z.number().int().min(1000).default(DEFAULT_TX_MAX_DURATION_MS),
   })
   .default({});
 
