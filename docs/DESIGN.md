@@ -46,9 +46,9 @@ Implemented in: `src/channel-core.ts`
 - `direct-only`
 
 ## Operational Notes
-- RX/TX transcript remains in `~/.openclaw/logs/digirig-YYYY-MM-DD.log`
-- `/digirig tx` and `/digirig calibrate` are preserved
-- PTT unkey is protected in `finally`
+- RX/TX transcript remains in `~/.openclaw/logs/digirig-YYYY-MM-DD.log` (Structured JSON-L format).
+- `/digirig tx` is preserved.
+- PTT unkey is protected in `finally`.
 - Microphone is explicitly unmuted (`amixer set Mic cap`) on startup to prevent `arecord` failures
 
 ## Known Practical Latency Budget

@@ -8,9 +8,9 @@ This plugin provides:
 - Speech-to-text to agent to text-to-speech pipeline using a robust batch-transcription approach.
 - digirig PTT handling and VOX support 
 - Carrier detection and transmission queuing for half-duplex operation
-- Transcription logging
+- **Structured JSON Logging:** High-precision metrics (latency, STT time) and RF signal reports (RMS/Peak dBFS) for every transmission.
+- **RF Signal Reporting:** The AI is automatically fed actual signal strength data to provide authentic "loud and clear" reports.
 - `/digirig tx` manual transmit a message over-the-air
-- `/digirig calibrate` AI assisted audio-level calibration
 - `/digirig doctor` service + listener diagnostics
 - `/digirig setup` prints host-aware setup commands
 
@@ -102,13 +102,6 @@ Transmit:
 /digirig tx Hello from OpenClaw
 ```
 
-### Calibrate audio
-```bash
-/digirig calibrate
-# then:
-/digirig calibrate result
-```
-
 ### Doctor check
 ```bash
 /digirig doctor
@@ -129,9 +122,14 @@ openclaw status
 openclaw gateway status
 ```
 
-- Check DigiRig logs:
+- Check DigiRig logs (Plaintext view):
 ```bash
 openclaw logs --plain | grep -i digirig | tail -n 80
+```
+
+- Query Latency Metrics (JSON view):
+```bash
+tail -n 20 ~/.openclaw/logs/digirig-$(date +%Y-%m-%d).log | jq '. | select(.type=="METRIC")'
 ```
 
 - Find who has the USB audio device open (for `arecord exited with 1`):

@@ -1,38 +1,49 @@
-# Agent Context
+# Reference for AI Agents: DigiRig OpenClaw Channel
 
-This repository is an OpenClaw plugin for integrating ham radio operation via a DigiRig Mobile interface.
+This document is a foundational reference for AI agents assisting in this repository. It documents the non-obvious "whack-a-mole" engineering decisions made to bridge imperfect analog radio hardware with digital AI.
 
-## Purpose
-It allows users to communicate with their AI agents over RF (radio frequency) using half-duplex (Push-To-Talk) hardware. 
+## 📻 Core Engineering Principles
 
-## High-Level Architecture
-1. **Audio Capture**: `src/audio-monitor.ts` constantly listens to the configured ALSA audio device. It manages Voice Activity Detection (VAD) and groups frames into discrete `utterances`.
-2. **Batch Transcription**: When an utterance ends (silence timeout met), the raw PCM buffer is sent via HTTP POST to a **hot-loaded Python HTTP daemon** (`127.0.0.1:18088`). If the daemon is unavailable, the system gracefully falls back to executing a slow, cold-start `whisper` CLI process (`src/runtime.ts` -> `transcribeWithLocalWhisper`).
-3. **Dispatch**: The text transcription is wrapped as a chat payload and routed to the OpenClaw core agent logic (`src/channel-core.ts`).
-4. **Text-To-Speech (TTS)**: When the agent replies, OpenClaw synthesizes the text into PCM audio.
-5. **PTT & Playback**: The plugin triggers the Request-To-Send (RTS) line via the serial port (`src/ptt.ts`) to key the radio, waits for the transmitter to settle, and pipes the PCM data through `aplay` (`src/tts.ts`).
+### 1. The "Batch over Streaming" Mandate
+**CRITICAL:** Do not re-introduce real-time streaming STT (WebSockets). 
+- **The Problem:** Half-duplex radios have noisy squelch tails and operators often pause mid-sentence. Streaming models (like WhisperLive) see this as "end of sentence" and then repeat or hallucinate (e.g., "Thanks for watching!").
+- **The Solution:** Use **Single-Shot Batch Execution**. Record the entire transmission into a WAV buffer, then transcribe it once the PTT is released.
 
-## Recent Paradigm Shift (Crucial for Context)
-**Do not introduce streaming or WebSocket-based Speech-to-Text.**
-We migrated *away* from real-time streaming (WhisperLive WebSockets) because half-duplex radio squelch tails and mid-sentence pauses confuse streaming models, leading to stuttering and hallucinations. The architecture is explicitly designed around **single-shot batch execution** after the `maxSilenceMs` is met.
+### 2. Dual-Tier VAD (Voice Activity Detection)
+The system distinguishes between **Speech** and **Carrier** using two thresholds:
+- **`energyThreshold` (~0.1):** Triggers the *start* of a recording. It ignores static and "kerchunks."
+- **`carrierSenseThreshold` (~0.0008):** *Holds* the recording open. As long as the squelch static is above this floor, the user can be dead silent for 30 seconds and the AI will wait for them.
+- **`maxSilenceMs` (~500ms):** Because we track the carrier, we can use a very short timeout. When the static drops to zero (PTT release), we process the audio instantly.
 
-## Key Configuration (OpenClaw Global Config)
-- `channels.digirig.audio.inputDevice`: Must wrap dsnoop in a plug interface to fix hardware samplerate inconsistencies (e.g., `plug:"dsnoop:CARD=Device,DEV=0"`).
-- `channels.digirig.stt.localWhisper.model`: Defaults to `base`, but `medium.en` or `large-v3` is highly recommended for systems with a dedicated GPU (e.g. RTX 3060) to correctly handle ham radio static and parse callsigns.
-- `channels.digirig.rx.energyThreshold` and `channels.digirig.rx.carrierSenseThreshold`: A two-tier VAD system. `energyThreshold` (e.g. 0.1) triggers the recording when the user speaks. `carrierSenseThreshold` (e.g. 0.0008) keeps the channel busy and recording alive as long as the radio's squelch is open (even if the user pauses).
-- `channels.digirig.rx.maxSilenceMs`: Because the system tracks the actual squelch drop, this can be set very low (e.g. 500ms) for snappy, sub-second STT processing when the user unkeys.
-- `channels.digirig.ptt.device`: The TTY device for the DigiRig (usually `/dev/ttyUSB0`).
+### 3. Hardware Interaction Timing
+- **Pre-PTT Synthesis:** Always generate the TTS audio buffer **BEFORE** keying the PTT relay. Radio finals are not 100% duty cycle; do not transmit "dead air" while waiting for an API response.
+- **Unkey Masking:** When a transmission finishes, the `AudioMonitor` MUST be muted for at least **1500ms**. This hides the loud mechanical "POP" of the PTT relay opening, which otherwise triggers a loop of "You" hallucinations.
+- **Max TX Guard:** A hard watchdog timer (default 120s) kills the `aplay` process and unkeys the radio if a transmission exceeds the safety limit, protecting hardware finals.
+- **ALSA Overrides:** Always use the `plug` ALSA wrapper (e.g., `plug:"dsnoop:CARD=Device"`) to handle hardware samplerate mismatches.
 
-## File Map
-- `index.ts`: Plugin entrypoint and basic definition.
-- `src/runtime.ts`: The main state machine connecting the AudioMonitor, Transcriber, and OpenClaw dispatch.
-- `src/audio-monitor.ts`: Heavy-lifting wrapper around `arecord` handling PCM capture, RMS energy checking, and chunking.
-- `src/channel-core.ts`: Helpers for interacting with the parent OpenClaw gateway environment.
-- `src/ptt.ts`: Serial port RTS controller.
-- `src/tts.ts`: `aplay` wrapper and OpenClaw SDK text-to-speech invocation.
-- `src/config.ts` / `src/defaults.ts`: Zod schema and defaults.
+## 🚀 The STT Pipeline
+The plugin uses a hybrid STT approach:
+1. **Primary:** HTTP POST to a **Hot-Loaded Python Daemon** (`scripts/stt_daemon.py`) running on port `18088`. This keeps the `medium.en` model hot in GPU VRAM (using CUDA + FP16) for sub-second latency.
+2. **Fallback:** If the daemon is down, it spawns a local `whisper` CLI process (cold-start, takes 3-5 seconds).
 
-## Testing
-Always run `npm run test:smoke` or `vitest run` before pushing changes.
+## 📝 Logging & Observability
+We use **Structured JSON-L Logging** in `~/.openclaw/logs/digirig-*.log`.
+- Every entry contains a `summary` field for human-readability.
+- Every RX entry contains `rmsDb` and `peakDb` metrics.
+- The AI is fed these metrics as `[System Data]` so it can give natural signal reports (e.g., "You are loud and clear").
 
-If diagnosing hardware issues, suggest ALSA commands (`amixer`, `aplay -l`, `arecord -l`) as the DigiRig hardware is heavily reliant on ALSA.
+## 🤖 The On-Air Persona
+**`src/prompt.ts`** is the master persona. 
+- It is injected only for radio-originating messages.
+- It forces the AI to use ITU Phonetics ("Whiskey 6"), prowords ("Roger", "Over"), and adhere to FCC ID requirements.
+- **Do not move this to a global OpenClaw skill.** It must remain channel-specific to avoid polluting non-radio interfaces.
+
+## 🛠️ Maintenance Commands
+- **Restart Gateway:** `openclaw gateway restart`
+- **Restart STT Daemon:** `systemctl --user restart whisper-daemon.service`
+- **Check Hardware:** `amixer -c Device sget Mic` / `arecord -L`
+
+## ⚠️ Common Pitfalls for Future Agents
+1. **Double Identification:** `src/runtime.ts` has a complex `appendCallsign` function. If the AI signs off with phonetics ("Whiskey Six..."), the code must detect it to avoid appending a second "W6RGC/AI" to the end.
+2. **Race Conditions:** Utterances terminated by a `tx` event MUST be ignored. The `AudioMonitor` tags these; do not process them or you will create infinite AI-talking-to-itself loops.
+3. **OS Portability:** This plugin is intentionally tightly coupled to **Linux ALSA** and **Serial RTS**. Do not attempt to abstract this for Windows/Mac unless explicitly asked; raw hardware control is required for radio stability.

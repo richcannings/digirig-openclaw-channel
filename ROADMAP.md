@@ -15,6 +15,7 @@
 - Policy simplified to `proactive` and `direct-only`
 - `channel-core.ts` extraction for reusable dispatch flow
 - Replaced buggy WhisperLive streaming with robust batch local Whisper
+- Implemented M1: TX Safety Interlocks (Max TX duration guard).
 - RX timing micro-optimizations and sane defaults (0.0008 carrier sense, 500ms silence)
 - Ignored hardware PTT unkey "pops" to fix phantom hallucination loops
 - Implemented M0: On-air personality + ham-operator behavior pack (`prompt.ts`)
@@ -22,9 +23,7 @@
 
 ## Next Milestones (My Prioritization)
 
-### M1 (Highest Priority): TX Safety Interlocks & FCC Compliance
-- Max TX duration guard (e.g., auto-unkey if generating audio for > 2 minutes).
-- Duplicate-message suppression window to prevent repeat TX after retries/races.
+### M1: FCC Compliance
 - Automatic Mandatory ID Cadence (e.g. periodically transmitting "W6RGC/AI" every 10 minutes during active QSOs).
 
 ### M2: "Fast-Ack" Mode (Perceived Latency)
