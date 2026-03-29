@@ -19,9 +19,21 @@ export function appendCallsign(text: string, callsign?: string): string {
   if (!callsign || !callsign.trim()) {
     return trimmed;
   }
-  if (trimmed.toUpperCase().includes(callsign.toUpperCase())) {
+  
+  // Clean punctuation from both strings for comparison
+  const cleanText = trimmed.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const cleanCallsign = callsign.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  
+  // Don't append if the clean text ends with the clean callsign
+  if (cleanText.endsWith(cleanCallsign)) {
     return trimmed;
   }
+  
+  // Also check if the AI spelled out the callsign phonetically near the end
+  if (trimmed.toUpperCase().includes("W6RGC") || trimmed.toLowerCase().includes("whiskey 6 romeo golf charlie") || trimmed.toLowerCase().includes("whiskey six romeo golf charlie")) {
+    return trimmed;
+  }
+  
   return `${trimmed} ${callsign}`;
 }
 
