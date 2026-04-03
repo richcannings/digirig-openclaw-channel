@@ -13,7 +13,7 @@ This document is a foundational reference for AI agents assisting in this reposi
 The system distinguishes between **Speech** and **Carrier** using two thresholds:
 - **`energyThreshold` (~0.1):** Triggers the *start* of a recording. It ignores static and "kerchunks."
 - **`carrierSenseThreshold` (~0.0008):** *Holds* the recording open. As long as the squelch static is above this floor, the user can be dead silent for 30 seconds and the AI will wait for them.
-- **`maxSilenceMs` (~500ms):** Because we track the carrier, we can use a very short timeout. When the static drops to zero (PTT release), we process the audio instantly.
+- **`maxSilenceMs` (250ms):** Because we track the carrier, we can use a very short timeout. When the static drops to zero (PTT release), we process the audio instantly. **Optimized from 500ms to 250ms for better response time.**
 
 ### 3. Hardware Interaction Timing
 - **Pre-PTT Synthesis:** Always generate the TTS audio buffer **BEFORE** keying the PTT relay. Radio finals are not 100% duty cycle; do not transmit "dead air" while waiting for an API response.

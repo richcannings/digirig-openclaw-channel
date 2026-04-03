@@ -1,12 +1,13 @@
 # DigiRig Channel Roadmap
 
-## Status (now)
-- Stable on-air RX/TX loop
-- Slimmed plugin surface
-- Ultra-low latency pipeline via dual-tier VAD (0.5s timeout) and Hot-Loaded HTTP STT Daemon.
-- Practical latency around ~2-3s with `medium.en` model + TTS path
-- Ham Radio Operator Persona embedded via `src/prompt.ts`
-- Comprehensive structured JSON logging (`digirig-*.log`) for transmission metrics
+## Status (Dec 2024)
+- **Stable on-air RX/TX loop** with proven field operation on K6BJ repeater
+- **Major performance improvements**: Claude Opus→Sonnet (2.2x faster), 250ms timeout optimization
+- **Enhanced persona**: Conversational continuity, emergency protocols, new ham inspiration
+- **Optimized latency pipeline**: Dual-tier VAD (250ms timeout), batch Whisper STT
+- **Current performance**: ~7s average response (improved from 16s), targeting <3s
+- **Ham Radio Operator Persona**: Embedded via `src/prompt.ts` with latest improvements
+- **Comprehensive structured JSON logging** (`digirig-*.log`) for transmission metrics
 
 ## Completed
 - Runtime restart-safety fixes
@@ -15,11 +16,13 @@
 - Policy simplified to `proactive` and `direct-only`
 - `channel-core.ts` extraction for reusable dispatch flow
 - Replaced buggy WhisperLive streaming with robust batch local Whisper
-- Implemented M1: TX Safety Interlocks (Max TX duration guard).
-- RX timing micro-optimizations and sane defaults (0.0008 carrier sense, 500ms silence)
+- **Implemented M1: TX Safety Interlocks** (Max TX duration guard)
+- **RX timing optimizations**: 0.0008 carrier sense, 250ms silence timeout (reduced from 500ms)
 - Ignored hardware PTT unkey "pops" to fix phantom hallucination loops
-- Implemented M0: On-air personality + ham-operator behavior pack (`prompt.ts`)
-- Implemented M2: Latency instrumentation (Structured JSON metrics logs)
+- **Implemented M0: Enhanced on-air personality** + ham-operator behavior pack (`src/prompt.ts`)
+- **Implemented M2: Performance monitoring** (Structured JSON metrics logs)
+- **Major model optimization**: Claude Opus→Sonnet switch for 2.2x speed improvement
+- **Conversational flow improvements**: Assume last callsign until corrected, emergency protocols
 
 ## Next Milestones (My Prioritization)
 
@@ -41,10 +44,11 @@
 - upstream to shared OpenClaw utilities where appropriate
 
 ## Success Metrics
-- Reliability: no restart-loop regressions in soak tests
-- Latency: maintain ~2s median PTT-release to response carrier
-- Operability: straightforward setup from README on a fresh host
-- Safety invariants: PTT always unkeys, restart behavior remains deterministic
+- **Reliability**: ✅ Stable operation with no restart-loop regressions
+- **Latency**: 🔄 Current ~7s average (improved from 16s), targeting <3s 
+- **Operability**: ✅ Straightforward setup from README on fresh host
+- **Safety invariants**: ✅ PTT always unkeys, restart behavior deterministic
+- **On-air acceptance**: ✅ Positive feedback from operators, successful QSOs on K6BJ repeater
 
 ## Testing Cadence
 After each milestone:

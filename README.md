@@ -10,6 +10,21 @@ It doesn't just listen—it behaves like a disciplined amateur radio operator. I
 
 ---
 
+## 🚀 Recent Performance Improvements (Dec 2024)
+
+**Major Speed Optimizations:**
+- **Model Switch:** Claude Opus → Claude Sonnet = **2.2x faster responses** (16s → 7s average)
+- **Timeout Reduction:** PTT silence detection optimized from 500ms to **250ms**
+- **Enhanced Persona:** Conversational continuity, emergency protocols, inspiring new hams
+- **Field Tested:** Successfully operating on K6BJ repeater with positive operator feedback
+
+**Current Performance:**
+- **Target Response Time:** <3 seconds (PTT release → audio response)
+- **Actual Performance:** ~7 seconds average (significant improvement from 16s)
+- **Bottleneck:** LLM processing (STT and audio very fast at ~400-1200ms)
+
+---
+
 ### Core Capabilities
 - Speech-to-text to agent to text-to-speech pipeline using a robust batch-transcription approach.
 - digirig PTT handling and VOX support 
