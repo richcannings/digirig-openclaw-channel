@@ -145,7 +145,7 @@ function isValidDtmfSequence(sequence: string): boolean {
 }
 
 /**
- * Generate DTMF audio sequence
+ * Generate DTMF audio sequence with PTT lead-in delay
  */
 function generateDtmfSequence(sequence: string, config: DtmfConfig): Buffer {
   const dtmfMatrix: { [key: string]: [number, number] } = {
@@ -156,6 +156,10 @@ function generateDtmfSequence(sequence: string, config: DtmfConfig): Buffer {
   };
 
   const buffers: Buffer[] = [];
+  
+  // Add 500ms silence at the beginning to ensure PTT is fully engaged
+  const leadInSilence = generateSilence(500, config.sampleRate);
+  buffers.push(leadInSilence);
   
   for (let i = 0; i < sequence.length; i++) {
     const digit = sequence[i].toUpperCase();
