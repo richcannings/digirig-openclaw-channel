@@ -8,7 +8,7 @@ import { getDigirigRuntime } from "./state.js";
 import type { DigirigConfig } from "./config.js";
 import { AudioMonitor } from "./audio-monitor.js";
 import { PttController } from "./ptt.js";
-import { playPcm, synthesizeTts } from "./tts.js";
+import { playPcm, synthesizeTts, synthesizeAudio, parseAudioContent } from "./tts.js";
 import { HAM_RADIO_PROMPT } from "./prompt.js";
 
 export function appendCallsign(text: string, callsign?: string): string {
@@ -211,10 +211,14 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       txInProgress = true;
       try {
         const trimmed = text.trim();
-        logger?.info?.(`[digirig] TTS input: ${trimmed}`);
+        logger?.info?.(`[digirig] Audio input: ${trimmed}`);
+        
+        // Parse content to determine if it's speech or DTMF
+        const audioContent = parseAudioContent(trimmed, config.audio.sampleRate);
+        logger?.info?.(`[digirig] Audio type: ${audioContent.type}`);
         
         // Generate the audio BEFORE keying the radio to prevent dead air.
-        const tts = await synthesizeTts(runtime, text);
+        const tts = await synthesizeAudio(runtime, audioContent);
         const bytesPerMs = tts.sampleRate * 2 / 1000;
         const audioMs = bytesPerMs > 0 ? Math.ceil(tts.audioBuffer.length / bytesPerMs) : 0;
         const muteMs = Math.max(0, config.ptt.leadMs + config.ptt.tailMs + audioMs + 500);

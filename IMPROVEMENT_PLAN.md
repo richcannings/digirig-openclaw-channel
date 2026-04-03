@@ -65,37 +65,69 @@ would make this accessible to hams without Linux sysadmin skills.
 
 ### P2 — On-Air Experience
 
-**6. Fast-Ack Mode (ROADMAP M2)**
+**6. Threaded Pipeline with Message Queues**
+Current synchronous pipeline occasionally drops transcriptions during processing, causing missed operator transmissions. Implement a fully threaded architecture with queues:
+- **Audio Input Queue**: Captured audio segments queued for STT processing
+- **STT Processing Thread**: Dedicated thread converts audio to text, feeds LLM queue  
+- **LLM Processing Queue**: Text transcriptions queued for AI response generation
+- **LLM Processing Thread**: Dedicated thread generates responses, feeds TX queue
+- **TX Output Queue**: Generated text queued for TTS and transmission
+- **TX Processing Thread**: Dedicated thread handles TTS synthesis and PTT control
+- **Benefits**: No dropped audio, parallel processing, better throughput, fault isolation
+
+**7. Reduce Doubling — Improved Channel Busy Detection**
+Current implementation has occasional doubling issues when multiple operators transmit simultaneously. Improve checking if the channel is busy before transmitting by:
+- Enhanced carrier sense logic before keying PTT
+- Configurable maximum busy-wait timeout (if channel stays busy beyond threshold, force transmit to prevent indefinite delay)
+- Better integration between VAD energy detection and actual RF carrier presence
+- Consider implementing a brief listen period after speech-to-text completes but before PTT
+
+**8. Fast-Ack Mode (ROADMAP M2)**
 The 2–3s silence after PTT release feels unresponsive to operators used to instant radio feedback. An immediate acknowledgement ("Copy, stand by" or a short tone) while the pipeline runs in the background dramatically improves perceived responsiveness. This is especially important for net operations where others are waiting.
 
-**7. Band/Mode Awareness**
+**9. Band/Mode Awareness**
 Injecting current band (2m, 40m, etc.) and mode (FM, SSB, AM) into the agent context would enable smarter responses — propagation questions, appropriate power limits, band plan reminders, and context-sensitive signal reports. Could be populated from CAT control or manual config.
 
-**8. Proactive Net Check-In Handling**
+**10. Proactive Net Check-In Handling**
 Many hams use repeaters with regular nets. A mode where the AI monitors for net control calling for check-ins and automatically responds with callsign would be a compelling feature for ARES/RACES operators.
+
+**11. DTMF Tone Transmission**
+Add capability to transmit DTMF (Dual-Tone Multi-Frequency) tones for:
+- Repeater access codes and PL tones
+- Autopatch dialing sequences
+- Remote control commands for repeaters or remote stations
+- APRS/packet radio setup commands
+- Integration with voice commands (e.g., "transmit DTMF 1-2-3-pound" or "send repeater code")
+- Configurable tone duration and inter-digit spacing
+- Support both inline DTMF during speech and dedicated DTMF-only transmissions
 
 ---
 
 ### P3 — Integration & Ecosystem
 
-**9. APRS / Winlink Integration**
+**12. APRS / Winlink Integration**
 Extend beyond voice — integrate with `direwolf` (APRS) or `pat` (Winlink) so the AI can relay messages, report position, or respond to APRS queries. This puts the plugin in the digital modes ecosystem, not just voice.
 
-**10. Repeater Directory Integration**
+**13. Repeater Directory Integration**
 Integrate with RepeaterBook's API so the AI can answer "what repeaters are on this frequency?" or auto-populate context with local repeater information based on configured operating frequency.
 
-**11. Logging Export to ADIF/Cabrillo**
+**14. Logging Export to ADIF/Cabrillo**
 The structured JSON-L logs are excellent but hams use ADIF for logbook software (Log4OM, WSJT-X, etc.) and Cabrillo for contests. An export command (`/digirig export adif`) would connect this to the broader amateur radio software ecosystem.
 
 ---
 
 ### P4 — Platform & Distribution
 
-**12. macOS Support (CoreAudio + USB Serial)**
+**15. macOS Support (CoreAudio + USB Serial)**
 Many hams use Macs. The intentional Linux-only stance is reasonable for stability but a macOS audio/serial backend using `sox` or `portaudio` instead of ALSA would expand reach significantly. Could be gated behind a `platform: "macos"` config flag.
 
-**13. Packaged Distribution**
+**16. Packaged Distribution**
 Currently requires cloning the repo and npm install. A Homebrew formula (macOS), `.deb` package (Ubuntu/Raspberry Pi OS), or Docker image with the Whisper daemon pre-configured would lower the installation barrier substantially.
+
+### P5 — Low Priority Fixes
+
+**17. Fix Log Rotation by Timestamp**
+Currently log entries are written to daily log files based on when the process starts, not the actual timestamp of the log entry. This causes late entries from one day to appear in the next day's log file (e.g., last entries in `digirig-2026-04-02.log` should be in `digirig-2026-04-03.log` if they occurred after midnight). Log rotation should be based on the actual event timestamp rather than process start time.
 
 ---
 
@@ -108,12 +140,16 @@ Currently requires cloning the repo and npm install. A Homebrew formula (macOS),
 | **P1** | CAT/VOX PTT abstraction | 10x hardware support | Medium |
 | **P1** | CPU-only Whisper path | Remove GPU requirement | Medium |
 | **P1** | First-run setup wizard | Accessibility | Medium |
+| **P2** | Threaded pipeline with message queues | Reliability / no dropped audio | High |
+| **P2** | Reduce doubling / channel busy detection | On-air reliability | Medium |
 | **P2** | Fast-Ack mode | On-air UX | Low |
 | **P2** | Band/mode context injection | Smarter responses | Low |
 | **P2** | Net check-in mode | ARES/RACES use case | Medium |
+| **P2** | DTMF tone transmission | Repeater control / autopatch | Medium |
 | **P3** | APRS/Winlink integration | Digital modes ecosystem | High |
 | **P3** | ADIF/Cabrillo log export | Logbook integration | Low |
 | **P4** | macOS backend | Platform reach | High |
 | **P4** | Packaged distribution | Installation UX | Medium |
+| **P5** | Fix log rotation by timestamp | Accurate daily logs | Low |
 
 The **P0 items are non-negotiable** before any public distribution — an AI transmitting without enforced station ID is a Part 97 violation and reflects poorly on the amateur radio community. The P1 items (especially CPU-only STT and CAT/VOX PTT) will determine whether this reaches the general ham population or stays a hobbyist tool for Linux/GPU users.
