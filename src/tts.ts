@@ -64,7 +64,7 @@ export function parseAudioContent(text: string, sampleRate: number): AudioConten
   
   if (dtmfCommand) {
     const config: DtmfConfig = {
-      toneDurationMs: 100,
+      toneDurationMs: 500, // Use the updated 500ms duration
       interDigitSilenceMs: 50,
       amplitude: 0.3,
       sampleRate,
