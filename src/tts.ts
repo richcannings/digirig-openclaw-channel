@@ -1,7 +1,5 @@
 import { spawn } from "node:child_process";
 import type { PluginRuntime } from "openclaw/plugin-sdk/core";
-// @ts-ignore - CommonJS import in ES module
-import tone from "tonegenerator";
 
 export type AudioContent = {
   type: 'speech';
@@ -64,8 +62,8 @@ export function parseAudioContent(text: string, sampleRate: number): AudioConten
   
   if (dtmfCommand) {
     const config: DtmfConfig = {
-      toneDurationMs: 500, // Use the updated 500ms duration
-      interDigitSilenceMs: 50,
+      toneDurationMs: 250, // Fixed to 250ms as requested
+      interDigitSilenceMs: 250, // Fixed to 250ms spacing as requested
       amplitude: 0.3,
       sampleRate,
     };
@@ -180,32 +178,24 @@ function generateDtmfSequence(sequence: string, config: DtmfConfig): Buffer {
 }
 
 /**
- * Generate dual-tone DTMF audio
+ * Generate dual-tone DTMF audio with precise timing control
  */
 function generateDualTone(freq1: number, freq2: number, config: DtmfConfig): Buffer {
-  const lengthSeconds = config.toneDurationMs / 1000;
-  const volume = Math.round((tone as any).MAX_16 * config.amplitude);
+  const samples = Math.floor(config.sampleRate * config.toneDurationMs / 1000);
+  const buffer = Buffer.alloc(samples * 2); // 16-bit
   
-  // Generate both frequency components
-  const tone1 = (tone as any)({ 
-    freq: freq1, 
-    lengthInSeconds: lengthSeconds,
-    volume: volume
-  });
-  
-  const tone2 = (tone as any)({ 
-    freq: freq2, 
-    lengthInSeconds: lengthSeconds,
-    volume: volume
-  });
-  
-  // Mix the two tones (DTMF = dual frequency)
-  const mixed = new Int16Array(tone1.length);
-  for (let i = 0; i < tone1.length; i++) {
-    mixed[i] = Math.round((tone1[i] + tone2[i]) / 2);
+  for (let i = 0; i < samples; i++) {
+    const t = i / config.sampleRate;
+    const sample = config.amplitude * (
+      Math.sin(2 * Math.PI * freq1 * t) +
+      Math.sin(2 * Math.PI * freq2 * t)
+    ) / 2;
+    
+    const intSample = Math.round(sample * 32767);
+    buffer.writeInt16LE(intSample, i * 2);
   }
   
-  return Buffer.from(mixed.buffer);
+  return buffer;
 }
 
 /**

@@ -22,7 +22,7 @@ export const DEFAULT_TX_ALIASES = "Overlord,Lord,Seven,7";
 export const DEFAULT_TX_MAX_DURATION_MS = 120000;
 
 export const DEFAULT_DTMF_ENABLED = false;
-export const DEFAULT_DTMF_TONE_DURATION_MS = 500;
-export const DEFAULT_DTMF_INTER_DIGIT_SILENCE_MS = 50;
+export const DEFAULT_DTMF_TONE_DURATION_MS = 250;
+export const DEFAULT_DTMF_INTER_DIGIT_SILENCE_MS = 250;
 export const DEFAULT_DTMF_AMPLITUDE = 0.3;
 
