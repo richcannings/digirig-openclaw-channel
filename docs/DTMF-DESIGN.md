@@ -82,6 +82,53 @@ Step 3 — PTT unkeys after CLI exits
 | `--wav-out` | No | — | Write generated audio to WAV file |
 | `--verbose` | No | false | Print timing and frequency details |
 
+### Help Output
+
+`dtmf-send --help` prints usage information designed to be readable by both humans and AI agents:
+
+```
+dtmf-send — Generate and transmit DTMF tones via ALSA audio device.
+
+USAGE:
+  dtmf-send --output <device> [options] <sequence>
+
+SEQUENCE:
+  One or more DTMF digits: 0-9 A-D * #
+  Examples: 767, 8315551234, "123*#A"
+
+OPTIONS:
+  --output <device>      ALSA audio device (required). Example: plughw:0,0
+  --tone-ms <ms>         Duration of each tone in ms (default: 250)
+  --spacing-ms <ms>      Silence between tones in ms (default: 250)
+  --lead-ms <ms>         Silence before first tone for PTT settling (default: 0)
+  --amplitude <0.0-1.0>  Base output amplitude (default: 0.3)
+  --voice-scale <float>  Scale amplitude relative to voice output level (default: 1.0)
+  --sample-rate <hz>     Audio sample rate (default: 16000)
+  --wav-out <path>       Write audio to WAV file instead of playing
+  --dry-run              Validate sequence and show timing without audio output
+  --verbose              Print detailed frequency and timing info
+  --help                 Show this help message
+
+DTMF FREQUENCY MATRIX:
+            1209Hz  1336Hz  1477Hz  1633Hz
+  697Hz:     1       2       3       A
+  770Hz:     4       5       6       B
+  852Hz:     7       8       9       C
+  941Hz:     *       0       #       D
+
+EXAMPLES:
+  dtmf-send --output plughw:0,0 767
+  dtmf-send --output plughw:0,0 --lead-ms 300 --voice-scale 1.4 767
+  dtmf-send --output plughw:0,0 --tone-ms 500 --spacing-ms 500 8315551234
+  dtmf-send --output plughw:0,0 --wav-out /tmp/test.wav --verbose 767
+
+EXIT CODES:
+  0  Success
+  1  Invalid arguments or sequence
+  2  Audio device error
+  3  Playback error
+```
+
 ### Exit Codes
 
 | Code | Meaning |
