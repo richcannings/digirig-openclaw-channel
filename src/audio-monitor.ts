@@ -42,6 +42,7 @@ export class AudioMonitor extends EventEmitter {
   private utteranceMs = 0;
   private silenceMs = 0;
   private lastActiveAt = 0;
+  private lastFrameEnergy = 0;
   private lastFrameAt = 0;
   private lastEndAt = 0;
   private stallTimer: NodeJS.Timeout | null = null;
@@ -114,6 +115,18 @@ export class AudioMonitor extends EventEmitter {
     return Date.now() - this.lastActiveAt < this.config.busyHoldMs;
   }
 
+  /** Returns true if the most recent audio frame had energy above carrier sense threshold. */
+  isCarrierPresent(): boolean {
+    // If the last frame is stale (>200ms old), we can't tell — assume clear.
+    if (Date.now() - this.lastFrameAt > 200) return false;
+    return this.lastFrameEnergy >= this.config.carrierSenseThreshold;
+  }
+
+  /** Returns the RMS energy of the most recent audio frame. */
+  getLastEnergy(): number {
+    return this.lastFrameEnergy;
+  }
+
   clearMute(): void { this.mutedUntil = 0; }
 
   muteFor(ms: number): void {
@@ -128,6 +141,7 @@ export class AudioMonitor extends EventEmitter {
     for (let offset = 0; offset + frameBytes <= chunk.length; offset += frameBytes) {
       const frame = chunk.subarray(offset, offset + frameBytes);
       const energy = computeRms(frame);
+      this.lastFrameEnergy = energy;
       if (energy > 0.0001) {
         this.emit("log", `frame energy=${energy.toFixed(6)}`);
       }

@@ -225,10 +225,56 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           txAbortController.abort();
         }, config.tx.maxTxMs);
 
+        const MAX_TX_ATTEMPTS = 3;
+        const BACKOFF_MS = 1200; // wait between retry attempts
+
         try {
-          await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 60000);
-          await ptt.withTx(async () => {
+          let transmitted = false;
+
+          for (let attempt = 1; attempt <= MAX_TX_ATTEMPTS; attempt++) {
+            // Check 1: Wait for channel to be clear (holdoff-based)
+            const waitResult = await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 60000);
+            if (waitResult === "timeout") {
+              logger?.warn?.(`[digirig] TX abandoned: channel busy for 60s (attempt ${attempt}/${MAX_TX_ATTEMPTS})`);
+              break;
+            }
+
+            // Check 2: Final carrier check right before PTT key-up.
+            // Sample a short window to confirm no one started transmitting
+            // in the gap between waitForClearChannel returning and now.
+            if (audioMonitor.isCarrierPresent()) {
+              logger?.info?.(`[digirig] TX deferred: carrier detected at final check (attempt ${attempt}/${MAX_TX_ATTEMPTS}, energy=${audioMonitor.getLastEnergy().toFixed(6)})`);
+              await delay(BACKOFF_MS);
+              continue;
+            }
+
+            // PTT key-up — but we split the lead delay to insert Check 3
+            await ptt.open();
+            await ptt.setTx(true);
             hooks?.onPttKeyed?.(Date.now());
+
+            // Check 3: Listen during lead delay. Key is up but audio hasn't
+            // started yet — if we detect carrier now, someone beat us. Abort.
+            if (config.ptt.leadMs > 0) {
+              // Wait most of the lead time, then sample
+              const listenMs = Math.max(30, config.ptt.leadMs - 30);
+              await delay(listenMs);
+
+              // Clear the mute briefly to let the monitor hear the channel
+              // (it's not muted yet — muteFor hasn't been called)
+              if (audioMonitor.isCarrierPresent() || audioMonitor.getBusy()) {
+                logger?.info?.(`[digirig] TX aborted mid-key: carrier detected during lead delay (attempt ${attempt}/${MAX_TX_ATTEMPTS}, energy=${audioMonitor.getLastEnergy().toFixed(6)})`);
+                await ptt.setTx(false);
+                await delay(BACKOFF_MS);
+                continue;
+              }
+
+              // Remaining lead delay
+              const remaining = config.ptt.leadMs - listenMs;
+              if (remaining > 0) await delay(remaining);
+            }
+
+            // All clear — commit to transmission
             audioMonitor.muteFor(muteMs);
             try {
               hooks?.onAudioStart?.(Date.now());
@@ -240,17 +286,28 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
                 signal: txAbortController.signal,
               });
             } finally {
+              if (config.ptt.tailMs > 0) await delay(config.ptt.tailMs);
+              await ptt.setTx(false);
               // Mute the microphone for an additional 1500ms after the audio finishes playing
               // to completely ignore the hardware PTT unkey "pop" and the radio's own squelch tail.
               audioMonitor.muteFor(1500);
             }
-          });
-          await logTranscript("TX", trimmed);
+
+            await logTranscript("TX", trimmed);
+            transmitted = true;
+            break;
+          }
+
+          if (!transmitted) {
+            logger?.warn?.(`[digirig] TX dropped after ${MAX_TX_ATTEMPTS} attempts: "${trimmed.slice(0, 80)}..."`);
+          }
         } finally {
           clearTimeout(maxTxTimer);
         }
       } catch (err) {
         logger?.error?.(`[digirig] TX sequence failed: ${String(err)}`);
+        // Safety: ensure PTT is unkeyed on any unexpected error
+        try { await ptt.setTx(false); } catch { /* ignore */ }
         audioMonitor.muteFor(1500);
       } finally {
         txInProgress = false;
@@ -588,14 +645,15 @@ async function waitForClearChannel(
   monitor: AudioMonitor,
   busyHoldMs: number,
   maxWaitMs: number,
-): Promise<void> {
+): Promise<"clear" | "timeout"> {
   const start = Date.now();
   while (monitor.getBusy()) {
     if (Date.now() - start > maxWaitMs) {
-      return;
+      return "timeout";
     }
     await delay(Math.max(50, busyHoldMs / 4));
   }
+  return "clear";
 }
 
 function delay(ms: number): Promise<void> {
