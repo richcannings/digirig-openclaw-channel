@@ -431,6 +431,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         let firstAudioAt = 0;
         let speakMs = 0;
         let didSpeak = false;
+        let detectedSender: string | null = null;
         
         ctx.log?.info?.(`[digirig] dispatch reply start session=${currentSessionId}`);
         const dispatchResult = await dispatchRadioReply({
@@ -444,7 +445,16 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             if (ctxPayload.OriginatingChannel !== "digirig" || ctxPayload.SessionKey !== "digirig:radio") return;
             if (didSpeak) return;
             
-            const shortReply = formatRadioReply(payload.text);
+            // Extract [SENDER:CALLSIGN] tag from LLM response
+            let replyText = payload.text;
+            const senderMatch = replyText.match(/^\s*\[SENDER:([A-Z0-9\/-]+)\]\s*/i);
+            if (senderMatch) {
+              detectedSender = senderMatch[1].toUpperCase();
+              replyText = replyText.slice(senderMatch[0].length);
+              ctx.log?.info?.(`[digirig] sender identified by LLM: ${detectedSender}`);
+            }
+            
+            const shortReply = formatRadioReply(replyText);
             if (!shortReply) return;
             if (!isSpeakableStreamingReply(shortReply)) return;
             
@@ -482,8 +492,19 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         await logEvent({
           type: "METRIC",
           sessionId: currentSessionId,
+          sender: detectedSender || undefined,
           ...timing,
         });
+        
+        // Write sender enrichment for the RX entry so log viewers can display it
+        if (detectedSender) {
+          await logEvent({
+            type: "RX_SENDER",
+            sessionId: currentSessionId,
+            sender: detectedSender,
+            text: text.trim(),
+          });
+        }
       } catch (err) {
         ctx.log?.error?.(`[digirig] utterance processing error: ${String(err)}`);
       }

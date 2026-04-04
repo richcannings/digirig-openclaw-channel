@@ -69,13 +69,28 @@ function formatTransmissionType(type, sequence = null) {
   return '';
 }
 
+// Track LLM-identified senders by session ID (enriched after dispatch)
+const senderMap = new Map();
+
 function formatLogEntry(line) {
   try {
     const entry = JSON.parse(line);
     const timestamp = formatTimestamp(entry.ts);
     
+    if (entry.type === 'RX_SENDER') {
+      // Sender enrichment from LLM — update our tracking map
+      if (entry.sender && entry.sessionId != null) {
+        senderMap.set(entry.sessionId, entry.sender);
+      }
+      return null; // Don't display separately, it enriches the RX entry
+    }
+    
     if (entry.type === 'RX') {
-      const callsign = formatCallsign(entry.text?.match(/\b[A-Z]+\d+[A-Z]+\b/)?.[0]);
+      // Use LLM-identified sender if available (from RX_SENDER or METRIC), fall back to regex
+      const llmSender = entry.sender || senderMap.get(entry.sessionId);
+      const regexSender = entry.text?.match(/\b[A-Z]{1,2}\d{1,2}[A-Z]{1,4}\b/)?.[0];
+      const sender = llmSender || regexSender;
+      const callsign = formatCallsign(sender);
       const signal = formatSignalQuality(entry);
       const text = entry.text || '';
       
@@ -99,7 +114,10 @@ function formatLogEntry(line) {
       return `${timestamp} ${txIcon}: ${text}${durationPart}`;
       
     } else if (entry.type === 'METRIC') {
-      // Skip detailed metrics, but could show simplified version
+      // Track sender from METRIC entries too
+      if (entry.sender && entry.sessionId != null) {
+        senderMap.set(entry.sessionId, entry.sender);
+      }
       return null;
       
     } else if (entry.type === 'RX_START') {
