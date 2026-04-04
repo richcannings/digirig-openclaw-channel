@@ -167,8 +167,12 @@ Allows others to follow along on the internet without a radio. Could be served f
 ### P4-9: Multi-Repeater Profile System
 Store per-repeater configs (codes, frequencies, etiquette rules, known operators) and auto-switch when changing repeaters.
 
-### P4-10: QRZ Integration
-Auto-lookup operator info from QRZ.com when a new callsign is heard. Personalize greetings with name and location.
+### P4-10: QRZ Integration (API Skill)
+Look up callsign info via QRZ.com XML API. Requires QRZ XML subscription (paid).  
+**Capabilities:** Name, location, grid square, license class, email, QSL info, bio.  
+**Use cases:** Personalize greetings ("Good evening Dave in Aptos"), verify callsigns, get grid squares for signal reports, research new stations heard on frequency.  
+**Implementation:** OpenClaw skill using `web_fetch` to QRZ XML API. API key stored in skill config.  
+**Waiting on:** Rich to get QRZ API account.
 
 ### P4-11: Net Control Assistant
 Help run nets: check-in tracking, relay management, priority traffic handling, timed announcements.
