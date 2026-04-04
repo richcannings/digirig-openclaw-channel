@@ -50,8 +50,9 @@ The AI doesn't just parrot responses. It maintains conversation context across a
 - Linux (tested on Debian/Ubuntu)
 - [OpenClaw](https://github.com/openclaw/openclaw) installed
 - [DigiRig Mobile](https://digirig.net/) connected to your radio
-- Python 3 + [Whisper](https://github.com/openai/whisper) installed
 - An amateur radio license and a callsign
+
+> **Note:** Whisper (speech-to-text) is **not** required before installation. Once OpenClaw is running, your AI assistant can download, install, and configure the Whisper STT server for you — just ask it.
 
 ### Install
 
@@ -102,15 +103,21 @@ openclaw config set channels.digirig.rx.preRollMs 600
 openclaw config set channels.digirig.ptt.leadMs 300
 ```
 
-### Set Up Fast STT (Recommended)
+### Set Up STT (Speech-to-Text)
 
-The hot-loaded Whisper daemon eliminates 2-4 second cold-start delays:
+You have two options:
 
+**Option A: Ask your AI to do it.** Once OpenClaw is running, just say:
+> *"Set up Whisper for DigiRig speech-to-text"*
+
+Your AI assistant will download Whisper, install the hot-loaded daemon, and configure everything.
+
+**Option B: Run the script manually:**
 ```bash
 ./scripts/setup-stt-daemon.sh
 ```
 
-Without this, it falls back to the slower CLI — still works, just adds latency.
+The hot-loaded daemon keeps the Whisper model in GPU VRAM for sub-second transcription. Without it, the system falls back to a slower CLI — still works, just adds 2-4 seconds of latency per transmission.
 
 ### Go Live
 
