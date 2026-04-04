@@ -6,7 +6,7 @@
 - [x] **DTMF Tones** — Standalone CLI `dtmf-send.mjs` + TX API on port 18089. Verified on K6BJ.
 - [x] **Anti-Doubling** — Triple carrier-sense check with retry and backoff.
 - [x] **PTT Lead Time** — 150ms → 300ms. Prevents clipped first syllables.
-- [x] **FCC Legitimacy Response** — Part 97.1 citations in prompt. Respectful defense when challenged.
+- [x] **FCC Compliance** — Part 97 awareness in prompt. Lighthearted, positive response if asked.
 - [x] **APRS Skill** — Read/send messages + locate stations via findu.com.
 - [x] **K6BJ Codes** — Complete from k6bj.org. AllStar/Echolink/phone patch.
 - [x] **AllStar Discovery** — Standard commands to detect AllStar on unknown repeaters.
@@ -201,5 +201,5 @@ Help run nets: check-in tracking, relay management, priority traffic handling, t
 1. APRS locate/read/send
 2. DTMF tones via radio session
 3. Anti-doubling under busy conditions
-4. FCC legitimacy response
+4. FCC compliance response
 5. New PTT lead time (300ms) — first syllables clear?

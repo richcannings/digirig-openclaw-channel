@@ -186,8 +186,8 @@ Loads a club roster CSV on startup. When Whisper garbles a callsign, Levenshtein
 
 Also tracks callsigns identified by the LLM during conversation, building a dynamic roster.
 
-### FCC Legitimacy
-When operators question AI on amateur radio, responds with confidence citing FCC Part 97.1 — the amateur service exists to advance the radio art, improve communication and technical skills, and expand technical expertise. Always respectful, never confrontational.
+### FCC Compliance
+Operates under FCC Part 97 with a licensed control operator. If someone asks about AI on amateur radio, responds with a lighthearted, positive take — we're here to advance the radio art and have fun.
 
 ---
 
