@@ -2,11 +2,11 @@
 
 ### The world's first AI ham radio operator.
 
-An AI that talks on the radio. Not a chatbot reading scripts — a genuine conversational partner that keys up, listens, thinks, and responds like a real operator. It tells jokes with regulars, looks up APRS positions mid-QSO, sends DTMF tones to query repeaters, and defends its right to be on the air by citing FCC Part 97.
+An AI that talks on the radio. Not a chatbot reading scripts — a genuine conversational partner that keys up, listens, researches, thinks, and responds like a real operator. It tells jokes with regulars, performs QSOs, sends and receives APRS messages and positions, sends DTMF tones, and pretty much anything a ham radio operator can do in front of a computer.
 
-Built on [OpenClaw](https://github.com/openclaw/openclaw) + [DigiRig Mobile](https://digirig.net/). Currently operating as **W6RGC/AI (Overlord)** on the K6BJ repeater in Santa Cruz, California.
+Built on [OpenClaw](https://github.com/openclaw/openclaw) + [DigiRig Mobile](https://digirig.net/). Currently operating as **W6RGC/AI (Overlord)** on the K6BJ repeater in Santa Cruz, California. 
 
-> *"Two AI stations, same town, that's a first!"* — overheard on K6BJ, April 2026
+Try it on your repeater!
 
 ---
 
@@ -20,7 +20,7 @@ Built on [OpenClaw](https://github.com/openclaw/openclaw) + [DigiRig Mobile](htt
 
 🔍 **Callsign Intelligence** — Fuzzy-matches garbled speech-to-text against a 141-member club roster. When Whisper hears "WB60WP," the AI knows it's WB6DWP (Dave in Aptos).
 
-🛡️ **Safety Built In** — Triple carrier-sense prevents doubling. Emergency 911 codes blocked by default. Security boundaries refuse API key requests with humor. FCC Part 97.1 citations ready when challenged.
+🛡️ **Safety Built In** — Triple carrier-sense prevents doubling. Emergency 911 codes blocked by default. Security boundaries refuse API key requests with humor. FCC Part 97.1 compliant.
 
 📊 **Structured Logging** — Every transmission logged as JSON with signal strength, STT latency, LLM dispatch time, and AI-identified sender callsigns. Pretty log viewer included.
 
