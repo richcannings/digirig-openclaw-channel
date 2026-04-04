@@ -145,42 +145,43 @@ Local time alongside UTC in logs.
 ### P4-4: Callsign Pronunciation Dictionary
 TTS phonetic overrides for common callsigns.
 
-### P4-5: Multi-Repeater Profile System
+### P4-5: Automatic QSO Logging
+Log every QSO automatically: callsign, time, frequency, mode, signal report, notes. Export to ADIF format for upload to LoTW/eQSL/QRZ. Data already exists in DigiRig logs — needs extraction and formatting.
+
+### P4-6: Band Condition Reporting
+Monitor propagation beacons, VOACAP predictions, or solar data (solar flux, K-index, A-index) and report band conditions on request. Useful for HF operations. Could check automatically and announce when conditions change.
+
+### P4-7: Winlink Integration
+Send and receive Winlink email over radio using VARA or packet. Useful for emergency communications when internet is down. Pairs well with offline mode (P3-5) and Direwolf (P3-2).
+
+### P4-8: Live Web Dashboard
+Turn the log parser (`digirig-tail.cjs`) into a web server that serves a live dashboard showing:
+- Real-time transcript (RX/TX with timestamps and callsigns)
+- AI thinking/tool usage (what the AI is doing and why)
+- Active operators on frequency (callsign roster with last-heard times)
+- Signal quality graphs (RMS/peak over time)
+- System status (STT latency, LLM dispatch time, PTT state)
+- APRS station locations on a map
+Allows others to follow along on the internet without a radio. Could be served from OpenClaw's existing web server or a standalone Express app.
+
+### P4-9: Multi-Repeater Profile System
 Store per-repeater configs (codes, frequencies, etiquette rules, known operators) and auto-switch when changing repeaters.
 
-### P4-6: QRZ Integration
+### P4-10: QRZ Integration
 Auto-lookup operator info from QRZ.com when a new callsign is heard. Personalize greetings with name and location.
 
-### P4-7: Contest Mode
-Optimized for rapid exchanges: serial number tracking, dupe checking, rate display, minimal-word responses.
-
-### P4-8: Net Control Assistant
+### P4-11: Net Control Assistant
 Help run nets: check-in tracking, relay management, priority traffic handling, timed announcements.
 
 ---
 
-## 🧠 Additional Features Worth Considering
+## 🧠 Ideas for Later
 
-### Automatic Band Condition Reporting
-Monitor propagation beacons, VOACAP predictions, or solar data (solar flux, K-index, A-index) and report band conditions on request. Useful for HF operations.
-
-### Automatic QSO Logging
-Log every QSO automatically: callsign, time, frequency, mode, signal report, notes. Export to ADIF format for upload to LoTW/eQSL/QRZ.
-
-### Multi-Radio Operation
-Support multiple radios simultaneously (e.g., VHF repeater monitoring + HF SSB operation). Each radio gets its own audio pipeline but shares the AI brain.
-
-### Satellite Pass Prediction
-Integrate with GPredict or n2yo.com to predict amateur satellite passes (ISS, SO-50, etc.) and alert operators when passes are starting.
-
-### Winlink Integration
-Send and receive Winlink email over radio using VARA or packet. Useful for emergency communications when internet is down.
-
-### Audio Waterfall / Spectrum Display
-Provide audio spectrum analysis to identify signals, interference, or band activity. Could be served via the web UI canvas.
-
-### Training Mode
-Act as an Elmer (mentor) for new hams: practice QSOs, teach procedure, quiz on regulations, simulate emergency traffic handling.
+- **Multi-Radio Operation** — Multiple radios sharing one AI brain (VHF monitor + HF)
+- **Satellite Pass Prediction** — GPredict/n2yo integration for amateur satellites
+- **Audio Waterfall / Spectrum Display** — Signal visualization via web UI canvas
+- **Training/Elmer Mode** — Practice QSOs, teach procedure, quiz regulations
+- **Contest Mode** — Rapid exchanges, serial numbers, dupe checking, rate display
 
 ---
 
