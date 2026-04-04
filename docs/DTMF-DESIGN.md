@@ -131,6 +131,7 @@ Step 3 — Listen for result:
 | `--dry-run` | No | false | Don't play audio, just validate and report |
 | `--wav-out` | No | — | Write generated audio to WAV file |
 | `--verbose` | No | false | Print timing and frequency details |
+| `--allow-emergency` | No | false | Allow emergency sequences (911, 78911). **Blocked by default.** |
 
 ### Help Output
 
@@ -157,6 +158,7 @@ OPTIONS:
   --wav-out <path>       Write audio to WAV file instead of playing
   --dry-run              Validate sequence and show timing without audio output
   --verbose              Print detailed frequency and timing info
+  --allow-emergency      Allow emergency sequences (911, 78911). Blocked by default.
   --help                 Show this help message
 
 DTMF FREQUENCY MATRIX:
@@ -206,6 +208,53 @@ Output: plughw:0,0 @ 16000Hz 16-bit mono
 Amplitude: 0.3 × 1.0 voice-scale = 0.3
 Total duration: 1550ms (300ms lead + 1250ms tones)
 DTMF 767 sent (3 tones, 1550ms total)
+```
+
+## Emergency Sequence Safety Gate
+
+The CLI **blocks emergency sequences by default**. This prevents accidental 911 calls via repeater phone patch, which could dispatch emergency services and violate FCC rules.
+
+### Blocked Sequences
+
+The following patterns are rejected unless `--allow-emergency` is explicitly passed:
+
+| Pattern | Reason |
+|---------|--------|
+| `911` | Direct 911 dial |
+| `78911` | K6BJ emergency phone patch (calls 911) |
+| `*911` | Star-prefixed emergency |
+| Any sequence containing `911` | Catch-all safety net |
+
+### CLI Behavior
+
+```bash
+# This is BLOCKED (exit code 1):
+$ dtmf-send --output plughw:0,0 78911
+ERROR: Sequence contains emergency code (911). Use --allow-emergency to override.
+
+# This is ALLOWED only with explicit flag:
+$ dtmf-send --output plughw:0,0 --allow-emergency 78911
+DTMF 78911 sent (5 tones, 2250ms total)
+```
+
+### AI Policy
+
+The AI agent **never passes `--allow-emergency`**. This is a hard-coded policy in the skill:
+
+- If an operator asks to call 911, the AI responds verbally: *"I cannot transmit emergency codes. If this is a real emergency, please dial 911 directly or key the repeater autopatch yourself."*
+- The `--allow-emergency` flag exists only for the human operator (Rich) to use manually from the command line if needed.
+- This policy is enforced at both the CLI level (flag required) and the AI level (skill instructions prohibit using the flag).
+
+### Implementation
+
+In the CLI, before generating tones:
+```javascript
+const EMERGENCY_PATTERN = /911/;
+
+if (EMERGENCY_PATTERN.test(sequence) && !args.allowEmergency) {
+  console.error("ERROR: Sequence contains emergency code (911). Use --allow-emergency to override.");
+  process.exit(1);
+}
 ```
 
 ## DTMF Frequency Matrix
@@ -342,7 +391,7 @@ The SKILL.md body would contain:
 - **Decision flow**: How to resolve the DTMF sequence (exact digits vs. lookup vs. research)
 - **On-air procedure**: Voice ID first, then CLI tool, then listen for result
 - **CLI usage**: How to run `dtmf-send` with correct device and timing params
-- **Safety rules**: Always confirm before sending, never send emergency codes (78911) without explicit operator instruction, identify before and after
+- **Safety rules**: Always confirm before sending. **NEVER pass `--allow-emergency` flag** — if an operator requests 911/emergency codes, decline verbally and advise them to dial directly. Always identify before and after.
 
 ### references/k6bj-codes.md
 
