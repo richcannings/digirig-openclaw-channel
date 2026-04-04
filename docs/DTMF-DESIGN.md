@@ -43,23 +43,73 @@ dtmf-send --output plughw:0,0 --wav-out /tmp/dtmf-767.wav 767
 dtmf-send --output plughw:0,0 --verbose 767
 ```
 
-## On-Air Sequence
+## Primary Use Case
 
-The AI handles DTMF requests in a two-step sequence. PTT management is external to the CLI — the AI (or a wrapper script) keys PTT, speaks the callsign via TTS, then runs the CLI tool while PTT is still keyed.
+An operator on the air asks the AI to send DTMF tones. The request may come in several forms:
 
+### 1. Exact sequence provided
 ```
 Operator: "Overlord, send DTMF 767"
+```
+The AI knows the exact digits. Confirm and send.
 
-Step 1 — Voice ID (existing TTS pipeline, PTT keyed):
-  AI speaks: "Copy, transmitting DTMF seven six seven. W6RGC/AI"
+### 2. Functional request — AI looks up the code
+```
+Operator: "Overlord, get me the temperature from the K6BJ repeater"
+```
+The AI knows (from its skill knowledge base / `references/k6bj-codes.md`) that K6BJ's temperature code is `768`. It looks up the code, confirms what it's doing, and sends.
 
-Step 2 — DTMF tones (CLI tool, PTT still keyed):
-  AI runs: dtmf-send --output plughw:0,0 --tone-ms 250 --spacing-ms 250 767
+### 3. Unknown code — AI researches
+```
+Operator: "Overlord, send the autopatch code for the W6QAP repeater"
+```
+The AI doesn't have W6QAP codes in its knowledge base. It searches the web or asks the operator for the specific code before transmitting.
 
-Step 3 — PTT unkeys after CLI exits
+### AI Decision Flow
+
+```
+Operator requests DTMF
+    │
+    ├─ Exact digits given? → Confirm and send
+    │
+    ├─ Functional request for known repeater? 
+    │   → Look up code in references/k6bj-codes.md (or similar)
+    │   → Confirm the code and what it does
+    │   → Send
+    │
+    └─ Unknown repeater or code?
+        → Search web / ask operator for the code
+        → Confirm before sending
+        → Send (or decline if unsure)
+```
+
+**The AI always confirms before sending.** Example responses:
+
+- *"Copy, sending DTMF seven six seven for K6BJ time announcement. W6RGC/AI"* → sends tones
+- *"Copy, K6BJ temperature is code seven six eight. Transmitting now. W6RGC/AI"* → sends tones
+- *"I don't have the codes for that repeater. Do you have the DTMF sequence?"* → waits for operator
+
+## On-Air Sequence
+
+The AI handles DTMF requests in a three-step sequence:
+
+```
+Step 1 — Voice confirmation + station ID (existing TTS/PTT pipeline):
+  AI speaks: "Copy, transmitting DTMF seven six eight for K6BJ temperature. W6RGC/AI"
+  PTT keys → 300ms lead → TTS audio plays → PTT unkeys
+
+Step 2 — DTMF tones (standalone CLI, separate PTT cycle):
+  AI keys PTT (ptt-on.js)
+  AI runs: dtmf-send --output plughw:0,0 --lead-ms 300 768
+  AI unkeys PTT (ptt-off.js)
+
+Step 3 — Listen for result:
+  AI monitors for repeater response (e.g., time/temperature announcement)
 ```
 
 **Important:** The CLI does NOT manage PTT. It only generates audio. PTT keying/unkeying is handled by the calling code (the DigiRig channel runtime or a wrapper script).
+
+**Why voice first:** FCC requires station identification. The AI must identify as W6RGC/AI before transmitting any signal. Speaking the callsign via TTS before the DTMF tones satisfies this requirement and also tells the operator (and anyone listening) what's about to happen.
 
 ## CLI Specification
 
@@ -280,35 +330,80 @@ name: digirig-tones
 description: >
   Generate and transmit DTMF tones and other radio signals via DigiRig.
   Use when operators request DTMF codes, repeater control, phone patch,
-  or tone tests. Requires active DigiRig PTT session. Currently supports
-  DTMF; Morse code planned.
+  or tone tests. Also use when an operator asks for repeater functions
+  by name (e.g., "get me the temperature", "what time is it", "connect
+  to echolink node"). Requires active DigiRig PTT session. Currently
+  supports DTMF; Morse code planned.
 ---
 ```
 
-The skill body would contain:
-- How to sequence voice ID + DTMF (PTT management)
-- CLI usage examples
-- Reference to K6BJ codes when on that repeater
-- Verification procedures
+The SKILL.md body would contain:
+- **Trigger conditions**: When to activate (operator mentions DTMF, tone, repeater code, temperature, time, autopatch, echolink, IRLP, phone patch)
+- **Decision flow**: How to resolve the DTMF sequence (exact digits vs. lookup vs. research)
+- **On-air procedure**: Voice ID first, then CLI tool, then listen for result
+- **CLI usage**: How to run `dtmf-send` with correct device and timing params
+- **Safety rules**: Always confirm before sending, never send emergency codes (78911) without explicit operator instruction, identify before and after
+
+### references/k6bj-codes.md
+
+Repeater-specific DTMF code reference. The AI reads this file when an operator asks for a function on a known repeater. Example content:
+
+```markdown
+# K6BJ Repeater DTMF Codes (146.790 MHz, Santa Cruz CA)
+
+## Function Codes
+| Code | Function | Description |
+|------|----------|-------------|
+| 767 | Time | Current time announcement |
+| 768 | Temperature | Outside temp and equipment rack temp |
+| 769 | Voltage | AC power and battery voltage |
+| 729 nnnnn | DTMF test | Repeater reads back your digits (1-16 digits) |
+| 28* | Signal replay | Transmit up to 10s of audio for playback |
+
+## Phone Patch
+| Code | Function |
+|------|----------|
+| 831 nnn nnnn | Dial local number |
+| 73 | Hang up (must ID after) |
+| 78911 | EMERGENCY — calls 911 (use only in genuine emergency) |
+| ** | Extend patch timeout |
+
+## IRLP / Echolink
+| Code | Function |
+|------|----------|
+| 33 nnnn | Connect to IRLP node (K6BJ is node 3318) |
+| *nnnnnn | Connect to Echolink node |
+| 73 | Disconnect (must ID after) |
+
+## Usage Protocol
+- Listen 30+ seconds before using any control codes
+- Always identify (W6RGC/AI) before and after using control functions
+- For signal replay: Send 28*, wait for "Ready" prompt, then transmit
+```
+
+Additional repeater code files can be added as the AI operates on other repeaters (e.g., `references/w6qap-codes.md`). The AI can also be asked to research codes for unfamiliar repeaters and save them for future use.
 
 ### Integration with DigiRig Channel
 
-The AI calls the CLI from within the existing `speak()` pipeline or as a follow-up command. Two integration patterns:
+The AI calls the CLI as a follow-up after its voice response. Two integration patterns:
 
-**Pattern A — Sequential (recommended):**
+**Pattern A — Sequential (current implementation):**
 ```
-1. AI generates voice text: "Copy, transmitting DTMF 767. W6RGC/AI"
-2. speak() handles voice TTS + PTT as normal
-3. After speak() completes and PTT unkeys...
-4. AI keys PTT manually (ptt-on.js)
-5. AI runs: dtmf-send --output plughw:0,0 --lead-ms 300 767
-6. AI unkeys PTT (ptt-off.js)
+1. AI resolves the DTMF sequence (from operator, knowledge base, or web search)
+2. AI generates voice text: "Copy, K6BJ temperature is code 768. Transmitting now. W6RGC/AI"
+3. speak() handles voice TTS + PTT as normal (keys, speaks, unkeys)
+4. AI keys PTT manually:     node ptt-on.js /dev/ttyUSB1
+5. AI runs DTMF CLI:         node dtmf-send.mjs --output plughw:0,0 --lead-ms 300 768
+6. AI unkeys PTT:            node ptt-off.js /dev/ttyUSB1
+7. AI listens for repeater response
 ```
 
 The `--lead-ms` value should match the DigiRig channel's `ptt.leadMs` config (currently **300ms**). This ensures the radio and repeater have time to fully open before the first tone. The AI reads this value from the channel config and passes it through.
 
+The `--output` device matches the DigiRig channel's `audio.outputDevice` config (currently `plughw:0,0`).
+
 **Pattern B — Combined (future optimization):**
-A wrapper script or runtime enhancement that keeps PTT keyed across both voice and DTMF, eliminating the gap. This is a future improvement once the basic flow is proven.
+A wrapper script or runtime enhancement that keeps PTT keyed across both voice and DTMF, eliminating the gap between voice ID and tones. This is a future improvement once the basic flow is proven.
 
 ## Future: Radio Signal CLI Family
 
