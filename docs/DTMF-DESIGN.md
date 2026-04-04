@@ -18,14 +18,14 @@ The previous DTMF implementation failed because tones were routed through the TT
 ## Usage
 
 ```bash
-# Basic: send 767 to default audio device
+# Basic: send 767 to audio device
 dtmf-send --output plughw:0,0 767
 
 # Custom timing
-dtmf-send --output plughw:0,0 --tone-ms 250 --spacing-ms 250 767
+dtmf-send --output plughw:0,0 --tone-ms 500 --spacing-ms 500 767
 
-# Louder output (0.0–1.0)
-dtmf-send --output plughw:0,0 --amplitude 0.5 767
+# Scale amplitude to match voice output level
+dtmf-send --output plughw:0,0 --voice-scale 1.4 767
 
 # Phone patch number
 dtmf-send --output plughw:0,0 8315551234
@@ -33,11 +33,14 @@ dtmf-send --output plughw:0,0 8315551234
 # All valid digits
 dtmf-send --output plughw:0,0 "123*#ABCD"
 
-# Sample rate override (default: 48000)
-dtmf-send --output plughw:0,0 --sample-rate 16000 767
+# Dry run — validate without playing
+dtmf-send --output plughw:0,0 --dry-run 767
 
-# Dry run — write to WAV file instead of playing
-dtmf-send --output plughw:0,0 --dry-run --wav-out /tmp/dtmf-767.wav 767
+# Write to WAV file for analysis
+dtmf-send --output plughw:0,0 --wav-out /tmp/dtmf-767.wav 767
+
+# Verbose output showing frequencies and timing
+dtmf-send --output plughw:0,0 --verbose 767
 ```
 
 ## On-Air Sequence
@@ -72,8 +75,9 @@ Step 3 — PTT unkeys after CLI exits
 | `--tone-ms` | No | 250 | Duration of each tone in milliseconds |
 | `--spacing-ms` | No | 250 | Silence between tones in milliseconds |
 | `--lead-ms` | No | 0 | Silence before first tone (PTT settling) |
-| `--amplitude` | No | 0.3 | Output amplitude, 0.0–1.0 |
-| `--sample-rate` | No | 48000 | Audio sample rate in Hz |
+| `--amplitude` | No | 0.3 | Base output amplitude, 0.0–1.0 (before scaling) |
+| `--voice-scale` | No | 1.0 | Scale amplitude relative to voice output level (see Amplitude Calibration) |
+| `--sample-rate` | No | 16000 | Audio sample rate in Hz (matches DigiRig audio chain) |
 | `--dry-run` | No | false | Don't play audio, just validate and report |
 | `--wav-out` | No | — | Write generated audio to WAV file |
 | `--verbose` | No | false | Print timing and frequency details |
@@ -128,15 +132,44 @@ No external libraries. Pure math — generate 16-bit signed PCM samples:
 ```
 For each sample i at sampleRate:
   t = i / sampleRate
-  sample = amplitude * (sin(2π * freq_row * t) + sin(2π * freq_col * t)) / 2
+  sample = finalAmplitude * (sin(2π * freq_row * t) + sin(2π * freq_col * t)) / 2
   output int16 = round(sample * 32767)
 ```
+
+### Amplitude Calibration
+
+DTMF tones must match the voice output level so the repeater's DTMF decoder sees consistent amplitude. The CLI supports a `--voice-scale` parameter that scales the base amplitude relative to voice TTS output.
+
+```
+finalAmplitude = clamp(baseAmplitude * voiceScale, 0.0, 1.0)
+```
+
+**How to determine the right scale value:**
+
+1. Record a voice TTS transmission: `arecord -D plughw:0,0 -f S16_LE -r 16000 -c 1 -d 5 voice-sample.raw`
+2. Measure RMS: `sox -r 16000 -e signed -b 16 -c 1 voice-sample.raw -n stat 2>&1 | grep "RMS amplitude"`
+3. Record a DTMF test tone at default amplitude: `dtmf-send --wav-out dtmf-test.wav --output plughw:0,0 5`
+4. Measure its RMS and compute the ratio: `voiceScale = voiceRMS / dtmfRMS`
+5. Use that value: `dtmf-send --voice-scale 1.4 --output plughw:0,0 767`
+
+The AI can automate this calibration by reading the TTS audio buffer RMS from the last transmission and passing an appropriate `--voice-scale`. The DigiRig channel runtime already computes RMS for inbound audio — extending this to outbound TTS buffers is straightforward.
+
+**Future automation:** The DigiRig runtime could emit a `lastTxRmsDb` metric after each voice transmission. The AI would then compute `voiceScale` automatically:
+```
+voiceScale = 10^(lastTxRmsDb / 20) / baseAmplitude
+```
+
+### Sample Rate
+
+Default: **16000 Hz** — matches the DigiRig audio chain (STT capture, TTS output). Using the same sample rate as voice ensures the audio device doesn't need to resample, and the output path is identical to what works for voice.
+
+Note: 16000 Hz provides adequate Nyquist headroom for all DTMF frequencies (highest column frequency is 1633 Hz, well below the 8000 Hz Nyquist limit).
 
 ### Playback
 
 Pipe raw PCM to `aplay`:
 ```bash
-<generated PCM> | aplay -D plughw:0,0 -f S16_LE -r 48000 -c 1 -t raw
+<generated PCM> | aplay -D plughw:0,0 -f S16_LE -r 16000 -c 1 -t raw
 ```
 
 No temp files. Stream directly to stdout of aplay via stdin.
@@ -244,8 +277,8 @@ All follow the same pattern:
 - Don't manage PTT
 - Packaged as OpenClaw skills
 
-## Open Questions
+## Resolved Design Questions
 
-1. **Default sample rate**: 48000Hz (CD quality, good for tone precision) vs 16000Hz (matches DigiRig STT chain). Leaning 48000 for tone accuracy since DTMF decoders are frequency-sensitive.
-2. **Amplitude calibration**: Should we auto-detect voice output levels and match? Or is a fixed 0.3 amplitude sufficient?
-3. **PTT gap**: Pattern A has a brief PTT gap between voice and tones. Acceptable? Or do we need Pattern B from the start?
+1. **Sample rate**: **16000 Hz** — matches DigiRig audio chain. All DTMF frequencies are well within Nyquist. Avoids resampling artifacts.
+2. **Amplitude**: **Scaled to voice output levels** via `--voice-scale`. Base amplitude 0.3, multiplied by a calibration scalar derived from voice TTS RMS. Future: auto-computed from last TX metrics.
+3. **PTT gap**: **Acceptable.** Pattern A (sequential: voice → unkey → rekey → tones) is the initial implementation. Pattern B (continuous PTT) deferred to future optimization if gap proves problematic on-air.
