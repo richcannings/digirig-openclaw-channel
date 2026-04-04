@@ -135,8 +135,87 @@ function normalizeSttText(text: string): string {
   return trimmed;
 }
 
+// ── Callsign fuzzy matching ────────────────────────────────────────
+// Loads known callsigns from SCCARC roster + recently heard callsigns.
+// Corrects STT-garbled callsigns in transcribed text.
+
+function loadKnownCallsigns(): string[] {
+  try {
+    const rosterPath = join(homedir(), ".openclaw", "workspace", "references", "sccarc-roster.csv");
+    const csv = require("node:fs").readFileSync(rosterPath, "utf8");
+    const lines = csv.split("\n").slice(1); // skip header
+    const calls: string[] = [];
+    for (const line of lines) {
+      const call = line.split(",")[0]?.trim().toUpperCase();
+      if (call && /^[A-Z]{1,2}\d{1,4}[A-Z]{1,4}$/.test(call)) {
+        calls.push(call);
+      }
+    }
+    return calls;
+  } catch {
+    return [];
+  }
+}
+
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function fuzzyMatchCallsign(garbled: string, knownCallsigns: string[], maxDistance = 2): string | null {
+  const upper = garbled.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!upper || upper.length < 3) return null;
+
+  // Exact match — no correction needed
+  if (knownCallsigns.includes(upper)) return null;
+
+  let bestMatch: string | null = null;
+  let bestDist = maxDistance + 1;
+
+  for (const known of knownCallsigns) {
+    const dist = levenshtein(upper, known);
+    if (dist > 0 && dist < bestDist) {
+      bestDist = dist;
+      bestMatch = known;
+    }
+  }
+
+  return bestMatch;
+}
+
+// Regex to find callsign-like patterns in text (may be garbled)
+const CALLSIGN_PATTERN = /\b[A-Z]{1,2}\d{1,4}[A-Z]{0,4}\b/gi;
+
+function correctCallsignsInText(text: string, knownCallsigns: string[], log?: any): string {
+  if (!knownCallsigns.length) return text;
+
+  return text.replace(CALLSIGN_PATTERN, (match) => {
+    const correction = fuzzyMatchCallsign(match, knownCallsigns);
+    if (correction && correction !== match.toUpperCase()) {
+      log?.info?.(`[digirig] callsign corrected: "${match}" → "${correction}"`);
+      return correction;
+    }
+    return match;
+  });
+}
+
 export async function createDigirigRuntime(config: DigirigConfig): Promise<DigirigRuntime> {
   const runtime = getDigirigRuntime();
+  
+  // Load known callsigns once at startup
+  const knownCallsigns = loadKnownCallsigns();
+  // Track recently heard callsigns (from LLM sender identification)
+  const heardCallsigns = new Set<string>();
   const audioMonitor = new AudioMonitor({
     device: config.audio.inputDevice,
     sampleRate: config.audio.sampleRate,
@@ -387,7 +466,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           model: typeof localCfg.model === "string" ? localCfg.model : "base",
           language: typeof (config.stt as any)?.language === "string" ? (config.stt as any).language : "en",
         });
-        const text = normalizeSttText(rawText);
+        const normalizedText = normalizeSttText(rawText);
+        // Correct garbled callsigns using roster + heard callsigns
+        const allKnown = [...knownCallsigns, ...heardCallsigns];
+        const text = correctCallsignsInText(normalizedText, allKnown, ctx.log);
         const sttEndAt = Date.now();
 
         ctx.log?.info?.(`[digirig] STT: ${text || "(empty)"}`);
@@ -452,6 +534,11 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
               detectedSender = senderMatch[1].toUpperCase();
               replyText = replyText.slice(senderMatch[0].length);
               ctx.log?.info?.(`[digirig] sender identified by LLM: ${detectedSender}`);
+              // Add to heard callsigns for future fuzzy matching
+              const baseSender = detectedSender.split("-")[0];
+              if (baseSender && /^[A-Z]{1,2}\d{1,4}[A-Z]{1,4}$/.test(baseSender)) {
+                heardCallsigns.add(baseSender);
+              }
             }
             
             const shortReply = formatRadioReply(replyText);
