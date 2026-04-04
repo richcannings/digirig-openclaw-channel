@@ -20,10 +20,6 @@ import {
   DEFAULT_TX_POLICY,
   DEFAULT_TX_ALIASES,
   DEFAULT_TX_MAX_DURATION_MS,
-  DEFAULT_DTMF_ENABLED,
-  DEFAULT_DTMF_TONE_DURATION_MS,
-  DEFAULT_DTMF_INTER_DIGIT_SILENCE_MS,
-  DEFAULT_DTMF_AMPLITUDE,
   } from "./defaults.js";
 
   const DigirigAudioSchema = z
@@ -81,15 +77,6 @@ import {
   })
   .default({});
 
-  const DigirigDtmfSchema = z
-  .object({
-    enabled: z.boolean().default(DEFAULT_DTMF_ENABLED),
-    toneDurationMs: z.number().int().min(10).max(1000).default(DEFAULT_DTMF_TONE_DURATION_MS),
-    interDigitSilenceMs: z.number().int().min(0).max(500).default(DEFAULT_DTMF_INTER_DIGIT_SILENCE_MS),
-    amplitude: z.number().min(0).max(1).default(DEFAULT_DTMF_AMPLITUDE),
-  })
-  .default({});
-
 export const DigirigConfigSchema = z.object({
   enabled: z.boolean().optional().default(true),
   audio: z.preprocess((val) => val ?? {}, DigirigAudioSchema),
@@ -97,7 +84,6 @@ export const DigirigConfigSchema = z.object({
   rx: z.preprocess((val) => val ?? {}, DigirigRxSchema),
   stt: z.preprocess((val) => val ?? {}, DigirigSttSchema),
   tx: z.preprocess((val) => val ?? {}, DigirigTxSchema),
-  dtmf: z.preprocess((val) => val ?? {}, DigirigDtmfSchema),
 });
 
 export type DigirigConfig = z.infer<typeof DigirigConfigSchema>;
