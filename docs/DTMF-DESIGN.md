@@ -99,14 +99,16 @@ DTMF 767 sent (3 tones, 1250ms total)
 ### Stdout (verbose mode)
 ```
 DTMF sequence: 7 6 7
+  Lead silence: 300ms
   Tone 7: 852Hz + 1209Hz, 250ms
   Spacing: 250ms
   Tone 6: 770Hz + 1477Hz, 250ms
   Spacing: 250ms
   Tone 7: 852Hz + 1209Hz, 250ms
-Output: plughw:0,0 @ 48000Hz 16-bit mono
-Total duration: 1250ms
-DTMF 767 sent (3 tones, 1250ms total)
+Output: plughw:0,0 @ 16000Hz 16-bit mono
+Amplitude: 0.3 × 1.0 voice-scale = 0.3
+Total duration: 1550ms (300ms lead + 1250ms tones)
+DTMF 767 sent (3 tones, 1550ms total)
 ```
 
 ## DTMF Frequency Matrix
@@ -252,9 +254,11 @@ The AI calls the CLI from within the existing `speak()` pipeline or as a follow-
 2. speak() handles voice TTS + PTT as normal
 3. After speak() completes and PTT unkeys...
 4. AI keys PTT manually (ptt-on.js)
-5. AI runs: dtmf-send --output plughw:0,0 767
+5. AI runs: dtmf-send --output plughw:0,0 --lead-ms 300 767
 6. AI unkeys PTT (ptt-off.js)
 ```
+
+The `--lead-ms` value should match the DigiRig channel's `ptt.leadMs` config (currently **300ms**). This ensures the radio and repeater have time to fully open before the first tone. The AI reads this value from the channel config and passes it through.
 
 **Pattern B — Combined (future optimization):**
 A wrapper script or runtime enhancement that keeps PTT keyed across both voice and DTMF, eliminating the gap. This is a future improvement once the basic flow is proven.
