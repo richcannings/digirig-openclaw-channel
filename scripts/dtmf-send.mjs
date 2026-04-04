@@ -20,8 +20,7 @@ function parseArgs(argv) {
     output: null, toneMs: 250, spacingMs: 250, leadMs: 0,
     amplitude: 0.3, voiceScale: 1.0, sampleRate: 16000,
     dryRun: false, wavOut: null, verbose: false, json: false,
-    allowEmergency: false, tx: false, txUrl: "http://127.0.0.1:18089/tx/raw",
-    help: false, sequence: null,
+    allowEmergency: false, help: false, sequence: null,
   };
   const rest = argv.slice(2);
   for (let i = 0; i < rest.length; i++) {
@@ -31,8 +30,6 @@ function parseArgs(argv) {
     else if (a === "--verbose") { args.verbose = true; }
     else if (a === "--json") { args.json = true; }
     else if (a === "--allow-emergency") { args.allowEmergency = true; }
-    else if (a === "--tx") { args.tx = true; }
-    else if (a === "--tx-url" && rest[i + 1]) { args.txUrl = rest[++i]; }
     else if (a === "--output" && rest[i + 1]) { args.output = rest[++i]; }
     else if (a === "--tone-ms" && rest[i + 1]) { args.toneMs = Number(rest[++i]); }
     else if (a === "--spacing-ms" && rest[i + 1]) { args.spacingMs = Number(rest[++i]); }
@@ -70,8 +67,6 @@ OPTIONS:
   --dry-run              Validate sequence and show timing without audio output
   --verbose              Print detailed frequency and timing info
   --json                 Output results as JSON
-  --tx                   Transmit via DigiRig runtime API (handles PTT automatically)
-  --tx-url <url>         DigiRig TX API URL (default: http://127.0.0.1:18089/tx/raw)
   --allow-emergency      Allow emergency sequences (911, 78911). Blocked by default.
   --help                 Show this help message
 
@@ -230,8 +225,8 @@ async function main() {
     process.exit(1);
   }
 
-  if (!args.output && !args.tx && !args.dryRun && !args.wavOut) {
-    console.error("ERROR: --output or --tx is required (or use --dry-run / --wav-out)");
+  if (!args.output && !args.dryRun && !args.wavOut) {
+    console.error("ERROR: --output is required (or use --dry-run / --wav-out)");
     process.exit(1);
   }
 
@@ -266,35 +261,7 @@ async function main() {
     if (!args.output) process.exit(0);
   }
 
-  // Transmit via DigiRig runtime API (handles PTT)
-  if (args.tx) {
-    try {
-      const url = `${args.txUrl}?sampleRate=${args.sampleRate}`;
-      const res = await fetch(url, {
-        method: "POST",
-        body: pcm,
-        headers: { "Content-Type": "application/octet-stream" },
-      });
-      const body = await res.json();
-      if (!body.ok) {
-        if (args.json) console.log(JSON.stringify({ ok: false, error: body.error }));
-        else console.error(`ERROR: ${body.error}`);
-        process.exit(3);
-      }
-      output(args, result);
-    } catch (e) {
-      if (args.json) console.log(JSON.stringify({ ok: false, error: e.message }));
-      else console.error(`ERROR: TX API failed: ${e.message}`);
-      process.exit(2);
-    }
-    process.exit(0);
-  }
-
-  // Play directly to audio device (no PTT management)
-  if (!args.output) {
-    console.error("ERROR: --output or --tx is required (or use --dry-run / --wav-out)");
-    process.exit(1);
-  }
+  // Play
   try {
     await playPcm(pcm, args.output, args.sampleRate);
     output(args, result);
