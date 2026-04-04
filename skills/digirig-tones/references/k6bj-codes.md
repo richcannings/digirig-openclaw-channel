@@ -1,55 +1,72 @@
 # K6BJ Repeater DTMF Codes
 
-**Repeater:** K6BJ, 146.790 MHz (−), PL 94.8 Hz  
-**Location:** Santa Cruz, California  
-**IRLP Node:** 3318
+**Source:** https://k6bj.org/wordpress/repeaters-2  
+**Repeater:** K6BJ VHF, 146.790 MHz (−), PL 94.8 Hz  
+**Location:** City of Santa Cruz, 330' AMSL, Grid CM96ax  
+**Linked to:** K6RMW/W 147.945− PL 94.8 (Watsonville, full-time link)  
+**AllStar Node:** 60216  
+**Echolink:** K6BJ-R #354814
+
+## Before Using Any Codes
+1. Listen at least 30 seconds to ensure repeater is not in use
+2. Identify (W6RGC/AI)
 
 ## Function Codes
 
 | Code | Function | Description |
 |------|----------|-------------|
-| 767 | Time | Current time announcement |
-| 768 | Temperature | Outside temperature and equipment rack temperature |
-| 769 | Voltage | AC power and battery voltage report |
-| 729 nnnnn | DTMF test | Repeater reads back your digits (1–16 digits) |
-| 28* | Signal replay | Transmit up to 10 seconds of audio for playback |
+| 767 | Time | Repeater announces current time |
+| 768 | Temperature | Outside temp and equipment rack temp |
+| 769 | Voltage | AC power and battery voltage |
+| 729 nnnnn | DTMF test | Repeater reads back your digits (1–16 digits, letter D cannot be read back) |
+| 28* | Signal replay | Send code, wait for "Ready", transmit up to 10s of audio for playback |
+| *920 | Help | Interactive help on repeater functionality |
 
 ## Phone Patch
 
 | Code | Function |
 |------|----------|
-| 831 nnn nnnn | Dial local number (7-digit with area code) |
-| 73 | Hang up phone patch (must identify after) |
-| ** | Extend patch timeout (resets timer during long calls) |
-| 78911 | EMERGENCY — calls 911 Emergency Center ⚠️ |
+| *6 nnn nnn nnnn | Dial 10-digit phone number with area code |
+| *0 | Hang up (must ID after) |
+| *6911 | EMERGENCY — calls 911 ⚠️ |
 
-> **⚠️ 78911 is blocked by the CLI safety gate.** The AI will never transmit this code. Only the human operator can use `--allow-emergency` from the command line.
+> **⚠️ *6911 is blocked by the CLI safety gate.** AI will never transmit this.
 
-## IRLP / Echolink
+## AllStar (Node 60216)
 
 | Code | Function |
 |------|----------|
-| 33 nnnn | Connect to IRLP node nnnn |
-| *nnnnnn | Connect to Echolink node nnnnnn |
-| 73 | Disconnect IRLP/Echolink (must identify after) |
+| *70 | Link status — what nodes are connected |
+| *3 <node> | Connect to AllStar node in transceive mode |
+| *2 <node> | Connect to AllStar node in monitor (listen only) mode |
+| *1 <node> | Disconnect from a specific node |
+| *76 | Disconnect from all nodes |
 
-## Usage Protocol
+**To connect K6BJ from another AllStar repeater:** `*3 60216`  
+**To disconnect:** `*1 60216`
 
-1. Listen for at least 30 seconds before using any control codes
-2. Identify (W6RGC/AI) before and after using control functions
-3. For signal replay (28*): send code, wait for "Ready" prompt, then transmit test audio
-4. After phone patch or IRLP/Echolink disconnect (73), you must identify
+## Echolink (K6BJ-R #354814)
+
+| Code | Function |
+|------|----------|
+| *33 <node> | Connect to Echolink node |
+| *13 <node> | Disconnect from Echolink node |
+| *76 | Disconnect from all nodes |
 
 ## Common Operator Requests → Codes
 
-| Operator says | Code | Notes |
-|---------------|------|-------|
-| "What time is it?" | 767 | |
-| "Get the temperature" | 768 | |
-| "Check the voltage" / "How's the power?" | 769 | |
-| "Test my DTMF" / "Read back my tones" | 729 + digits | |
-| "Connect to echolink node 1234" | *1234 | |
-| "Connect to IRLP node 5678" | 33 5678 | |
-| "Disconnect" / "Drop the link" | 73 | Must ID after |
-| "Dial 831-555-1234" | 8315551234 | Phone patch |
-| "Hang up" | 73 | Must ID after |
+| Operator says | Code |
+|---------------|------|
+| "What time is it?" | 767 |
+| "Get the temperature" | 768 |
+| "Check the voltage" / "How's the power?" | 769 |
+| "Test my DTMF" / "Read back my tones" | 729 + digits |
+| "Check link status" / "What's connected?" | *70 |
+| "Connect to AllStar node 12345" | *3 12345 |
+| "Disconnect from node 12345" | *1 12345 |
+| "Disconnect all links" | *76 |
+| "Connect to Echolink node 1234" | *33 1234 |
+| "Play back my signal" | 28* |
+| "Dial 831-555-1234" | *6 831 555 1234 |
+| "Hang up the phone" | *0 |
+| "Help" / "What can the repeater do?" | *920 |
