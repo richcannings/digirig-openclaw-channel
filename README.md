@@ -1,64 +1,60 @@
 # 📻 DigiRig OpenClaw Channel
 
-**Turn your ham radio into a direct link to an advanced AI assistant.**
+### The world's first AI ham radio operator.
 
-This plugin bridges analog RF and modern Large Language Models using a [DigiRig Mobile](https://digirig.net/) interface. Your AI agent is just a PTT press away — on repeaters, simplex, or any voice frequency.
+An AI that talks on the radio. Not a chatbot reading scripts — a genuine conversational partner that keys up, listens, thinks, and responds like a real operator. It tells jokes with regulars, looks up APRS positions mid-QSO, sends DTMF tones to query repeaters, and defends its right to be on the air by citing FCC Part 97.
 
-Built for the realities of RF: dual-tier voice activity detection, squelch tail masking, PTT relay pop suppression, real-time signal strength reporting, and a hot-loaded GPU Whisper daemon for sub-second transcription.
+Built on [OpenClaw](https://github.com/openclaw/openclaw) + [DigiRig Mobile](https://digirig.net/). Currently operating as **W6RGC/AI (Overlord)** on the K6BJ repeater in Santa Cruz, California.
 
-**Operating as W6RGC/AI (Overlord) on K6BJ repeater, Santa Cruz, California.**
+> *"Two AI stations, same town, that's a first!"* — overheard on K6BJ, April 2026
 
 ---
 
-## What It Does
+## What It Can Do
 
-- **Voice QSOs** — Full-duplex conversational AI on amateur radio
-- **DTMF Tones** — Send repeater control codes via standalone CLI + TX API
-- **APRS Messages** — Read, send, and locate stations via findu.com
-- **Callsign Matching** — Fuzzy-corrects garbled STT callsigns using club roster
-- **Anti-Doubling** — Triple carrier-sense check before every transmission
-- **FCC Compliance** — Part 97.1 aware, station ID tracking, emergency gate
-- **Structured Logging** — JSON logs with metrics, signal reports, LLM-identified senders
+🎙️ **Voice QSOs** — Natural conversations on any voice repeater or simplex frequency. Adapts tone for different operators — professional with newcomers, cheeky with regulars.
 
-## Architecture
+📡 **DTMF Control** — Sends repeater control codes on command. "Get me the temperature from K6BJ" → identifies with callsign, sends DTMF 768, reports the result. Knows K6BJ codes, AllStar commands, and can discover codes for unknown repeaters.
+
+🗺️ **APRS** — Reads messages, sends messages, and locates stations via findu.com. "Where is KN6TYR-1?" → "0.4 miles southwest of Santa Cruz, heading north-northeast at 6.9 MPH."
+
+🔍 **Callsign Intelligence** — Fuzzy-matches garbled speech-to-text against a 141-member club roster. When Whisper hears "WB60WP," the AI knows it's WB6DWP (Dave in Aptos).
+
+🛡️ **Safety Built In** — Triple carrier-sense prevents doubling. Emergency 911 codes blocked by default. Security boundaries refuse API key requests with humor. FCC Part 97.1 citations ready when challenged.
+
+📊 **Structured Logging** — Every transmission logged as JSON with signal strength, STT latency, LLM dispatch time, and AI-identified sender callsigns. Pretty log viewer included.
+
+---
+
+## How It Works
 
 ```
-Radio RX → DigiRig USB Audio → arecord → AudioMonitor (energy/VAD)
-  → Callsign fuzzy match (SCCARC roster)
-  → Whisper STT (hot daemon or CLI fallback)
-  → normalizeSttText() → isDirectCall() check
-  → HAM_RADIO_PROMPT injection → OpenClaw agent dispatch → LLM response
-  → [SENDER:CALLSIGN] extraction → formatRadioReply() → appendCallsign()
-  → Triple carrier-sense check → PTT key → TTS → aplay → PTT unkey
+Radio → DigiRig USB → Audio Capture → Speech Detection (dual-tier VAD)
+  → Callsign Fuzzy Matching (SCCARC roster)
+  → Whisper STT (GPU daemon, sub-second)
+  → OpenClaw Agent + Claude LLM
+  → [SENDER:WB6DWP] extraction for logging
+  → Text-to-Speech → Triple Carrier Sense Check
+  → PTT Key → 300ms settle → Audio Out → PTT Unkey
 
-DTMF path: dtmf-send.mjs --tx → POST /tx/raw (port 18089) → PTT + raw PCM
+DTMF path: dtmf-send CLI → POST localhost:18089/tx/raw → PTT + raw PCM tones
 ```
 
-## Key Components
+The AI doesn't just parrot responses. It maintains conversation context across a session, remembers who it's been talking to, corrects garbled callsigns, and knows when to stay quiet (most of the time).
 
-| File | Purpose |
-|------|---------|
-| `src/runtime.ts` | Main runtime: RX/TX loop, TX API server, callsign matching |
-| `src/audio-monitor.ts` | Audio capture, VAD, energy detection, carrier sensing |
-| `src/prompt.ts` | Ham radio operator persona (15 sections) |
-| `src/ptt.ts` | PTT serial control (RTS) |
-| `src/tts.ts` | TTS synthesis + aplay playback |
-| `src/config.ts` | Zod schema for all DigiRig config |
-| `src/defaults.ts` | Default values for all config |
-| `src/channel-core.ts` | OpenClaw channel routing integration |
-| `scripts/dtmf-send.mjs` | Standalone DTMF tone CLI (zero deps) |
-| `scripts/digirig-tail.cjs` | Pretty log viewer with LLM sender attribution |
-
-## Skills
-
-| Skill | Location | Purpose |
-|-------|----------|---------|
-| `digirig-tones` | `skills/digirig-tones/` | DTMF transmission + K6BJ/AllStar codes |
-| `aprs-messages` | `~/.openclaw/workspace/skills/aprs-messages/` | APRS read/send/locate via findu.com |
+---
 
 ## Quick Start
 
-### 1) Install plugin
+### Prerequisites
+- Linux (tested on Debian/Ubuntu)
+- [OpenClaw](https://github.com/openclaw/openclaw) installed
+- [DigiRig Mobile](https://digirig.net/) connected to your radio
+- Python 3 + [Whisper](https://github.com/openai/whisper) installed
+- An amateur radio license and a callsign
+
+### Install
+
 ```bash
 cd ~/src
 git clone https://github.com/richcannings/digirig-openclaw-channel
@@ -67,81 +63,208 @@ npm install
 openclaw plugins install -l ~/src/digirig-openclaw-channel
 ```
 
-### 2) Configure audio + PTT
+### Configure
+
 ```bash
+# Audio devices (find yours with: arecord -l && aplay -l)
 openclaw config set channels.digirig.audio.inputDevice "plughw:0,0"
 openclaw config set channels.digirig.audio.outputDevice "plughw:0,0"
+
+# PTT serial (find yours with: ls /dev/ttyUSB*)
 openclaw config set channels.digirig.ptt.device "/dev/ttyUSB0"
 openclaw config set channels.digirig.ptt.rts true
-```
 
-### 3) Set up STT daemon (recommended)
-```bash
-./scripts/setup-stt-daemon.sh
-```
-Falls back to cold-start Whisper CLI if daemon isn't running.
-
-### 4) Configure callsign + policy
-```bash
-openclaw config set channels.digirig.tx.callsign "W6RGC/AI"
+# Your callsign
+openclaw config set channels.digirig.tx.callsign "YOURCALL/AI"
 openclaw config set channels.digirig.tx.policy "proactive"
-openclaw config set channels.digirig.tx.aliases "Overlord,Lord,Seven,7"
+openclaw config set channels.digirig.tx.aliases "YourName"
 ```
 
-### 5) Recommended RX settings
+### Recommended Tuning
+
 ```bash
+# RX sensitivity
 openclaw config set channels.digirig.rx.energyThreshold 0.1
 openclaw config set channels.digirig.rx.carrierSenseThreshold 0.0008
 openclaw config set channels.digirig.rx.maxSilenceMs 250
 openclaw config set channels.digirig.rx.preRollMs 600
+
+# TX timing
 openclaw config set channels.digirig.ptt.leadMs 300
 ```
 
-### 6) Restart and test
+### Set Up Fast STT (Recommended)
+
+The hot-loaded Whisper daemon eliminates 2-4 second cold-start delays:
+
+```bash
+./scripts/setup-stt-daemon.sh
+```
+
+Without this, it falls back to the slower CLI — still works, just adds latency.
+
+### Go Live
+
 ```bash
 openclaw gateway restart
 ```
 
-Transmit: *"Overlord, this is [your callsign]. What is 2 plus 2?"*
+Key up your radio: *"[YourName], this is [YourCall]. Radio check."*
 
-## Log Viewer
+### Watch the Logs
 
 ```bash
 node scripts/digirig-tail.cjs
 ```
 
-Color-coded real-time log with LLM-identified sender callsigns, signal quality, and TX/RX events.
+---
+
+## Features in Detail
+
+### Voice Operation
+- Dual-tier voice activity detection handles squelch tails and noise
+- 600ms pre-roll buffer captures the start of fast talkers
+- 250ms end-of-speech detection for snappy turn-taking
+- TTS speed configurable (default 1.25x for radio pacing)
+- Callsign auto-appended to every transmission
+
+### Anti-Doubling
+Three checks before every transmission:
+1. Wait for 800ms of channel silence
+2. Final energy sample right before PTT key
+3. Listen during 300ms PTT lead delay — abort if carrier detected
+
+Up to 3 retries with 1200ms backoff. After 60 seconds of busy channel, drops the message instead of transmitting over someone.
+
+### DTMF Tones
+Standalone CLI generates pure dual-tone PCM and transmits via local TX API:
+
+```bash
+# Send K6BJ temperature code
+node scripts/dtmf-send.mjs --tx --json 768
+
+# All options
+node scripts/dtmf-send.mjs --help
+```
+
+Emergency sequences (911) blocked by default. K6BJ control codes, AllStar commands, and Echolink codes documented in the skill.
+
+### APRS via findu.com
+No API key needed:
+
+```bash
+# Locate a station
+web_fetch http://www.findu.com/cgi-bin/find.cgi?call=KN6TYR-1
+
+# Read messages
+web_fetch http://www.findu.com/cgi-bin/msg.cgi?call=KE6AFE-2
+
+# Send a message
+web_fetch http://www.findu.com/cgi-bin/sendmsg.cgi?fromcall=W6RGC&tocall=KE6AFE-2&msg=Hello
+```
+
+### Callsign Fuzzy Matching
+Loads a club roster CSV on startup. When Whisper garbles a callsign, Levenshtein distance matching corrects it:
+- `WB60WP` → `WB6DWP` (distance 1)
+- `KU6AFE` → `KE6AFE` (distance 1)
+
+Also tracks callsigns identified by the LLM during conversation, building a dynamic roster.
+
+### FCC Legitimacy
+When operators question AI on amateur radio, responds with confidence citing FCC Part 97.1 — the amateur service exists to advance the radio art, improve communication and technical skills, and expand technical expertise. Always respectful, never confrontational.
+
+---
+
+## Performance (April 2026)
+
+| Metric | Value |
+|--------|-------|
+| STT latency | 300-900ms (hot daemon) |
+| LLM dispatch | 7-15s (Sonnet) |
+| PTT lead time | 300ms |
+| End-of-speech | 250ms |
+| Callsign roster | 141 entries (SCCARC) |
+| Anti-doubling | 3 checks + 3 retries |
+
+---
+
+## Project Structure
+
+```
+src/
+  runtime.ts          Main loop, TX API, callsign matching
+  audio-monitor.ts    RX capture, VAD, carrier sensing
+  prompt.ts           15-section ham radio persona
+  ptt.ts              Serial PTT control
+  tts.ts              TTS synthesis + playback
+  config.ts           Configuration schema
+  defaults.ts         Default values
+  channel-core.ts     OpenClaw integration
+
+scripts/
+  dtmf-send.mjs       DTMF tone CLI (zero dependencies)
+  digirig-tail.cjs    Pretty log viewer
+
+skills/
+  digirig-tones/      DTMF skill + K6BJ/AllStar codes
+
+docs/
+  ROADMAP-CURRENT.md  Where this project is going
+  DESIGN.md           Architecture deep-dive
+  DTMF-DESIGN.md      DTMF CLI design document
+  SMOKE_TEST.md       Post-update test checklist
+```
+
+---
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
 | `/digirig tx <message>` | Manual transmit |
-| `/digirig doctor` | Diagnostics check |
-| `/digirig setup` | Auto-detect device setup |
+| `/digirig doctor` | Diagnostics |
+| `/digirig setup` | Auto-detect devices |
 
-## Docs
+---
 
-| Document | Description |
-|----------|-------------|
-| `docs/ROADMAP-CURRENT.md` | Active development roadmap with priorities |
-| `docs/DESIGN.md` | Architecture and design principles |
-| `docs/DTMF-DESIGN.md` | DTMF CLI design document |
-| `docs/SMOKE_TEST.md` | Post-update test checklist |
-| `docs/HAM_RADIO_AI_OPERATIONS.md` | Comprehensive operations guide |
-| `AGENT.md` | AI agent reference for this codebase |
+## Where This Project Is Going
 
-## Current Performance (April 2026)
+See **[docs/ROADMAP-CURRENT.md](docs/ROADMAP-CURRENT.md)** for the full roadmap. Highlights:
 
-| Metric | Value |
-|--------|-------|
-| STT latency | 300-900ms (hot daemon) |
-| LLM dispatch | 7-15s (Sonnet), 30-60s (Opus) |
-| PTT lead time | 300ms |
-| End-of-speech detection | 250ms |
-| Anti-doubling | Triple check + 3 retries |
-| Callsign correction | Levenshtein ≤2, 141 roster entries |
+🔜 **Coming Soon:**
+- Faster radio model (Sonnet) for sub-10s responses
+- FCC 10-minute auto-ID timer
+- Improved Whisper hallucination filtering
+
+🔮 **On the Horizon:**
+- **CAT Control** — Full ICOM IC-705 integration (change frequency, mode, read S-meter)
+- **CW Send/Receive** — Morse code via ggmorse
+- **Offline APRS** — Direct RF packets via Direwolf on 144.390
+- **SSB Mode** — VAD-based speech detection without squelch
+- **Live Web Dashboard** — Real-time transcript, AI reasoning, active operators
+- **Offline Mode** — Local LLM + offline knowledge for field/emergency deployments
+- **Winlink** — Email over radio for emergency communications
+- **QSO Logging** — Automatic ADIF export for LoTW/eQSL
+
+See the [full roadmap](docs/ROADMAP-CURRENT.md) for details, priorities, and architecture notes.
+
+---
+
+## Contributing
+
+This project is in active development. If you're a ham who codes (or a coder who hams), we'd love your help. The best way to get started is to read the roadmap, pick something that interests you, and open a PR.
+
+**Key docs for contributors:**
+- [AGENT.md](AGENT.md) — Architecture decisions and gotchas
+- [docs/DESIGN.md](docs/DESIGN.md) — How the pipeline works
+- [docs/ROADMAP-CURRENT.md](docs/ROADMAP-CURRENT.md) — What needs building
+
+---
 
 ## License
 
 MIT
+
+---
+
+*73 de W6RGC/AI — Overlord, Santa Cruz CA*
