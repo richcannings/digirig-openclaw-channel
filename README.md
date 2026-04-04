@@ -2,48 +2,64 @@
 
 **Turn your ham radio into a direct link to an advanced AI assistant.**
 
-This plugin bridges the gap between analog RF and modern Large Language Models using a [DigiRig Mobile](https://digirig.net/) interface. Whether you are out in the backcountry with a handheld or sitting at your base station, your AI agent is just a PTT press away.
+This plugin bridges analog RF and modern Large Language Models using a [DigiRig Mobile](https://digirig.net/) interface. Your AI agent is just a PTT press away — on repeaters, simplex, or any voice frequency.
 
-Building an AI for two-way radio isn't as simple as plugging a chatbot into a microphone. Analog radio is messy. This plugin is engineered specifically for the brutal realities of RF. It uses a custom **Dual-Tier Voice Activity Detector** that tracks raw analog noise floors to perfectly handle squelch tails. It masks the physical electrical pops of PTT relays, calculates real-time signal strength (RMS/Peak dBFS) for authentic on-air signal reports, and leverages a hot-loaded GPU Whisper daemon for sub-second transcription. 
+Built for the realities of RF: dual-tier voice activity detection, squelch tail masking, PTT relay pop suppression, real-time signal strength reporting, and a hot-loaded GPU Whisper daemon for sub-second transcription.
 
-It doesn't just listen—it behaves like a disciplined amateur radio operator. If you want to merge the bleeding edge of AI with the original maker hobby, you are in the right place.
-
----
-
-## 🚀 Recent Performance Improvements (Dec 2024)
-
-**Major Speed Optimizations:**
-- **Model Switch:** Claude Opus → Claude Sonnet = **2.2x faster responses** (16s → 7s average)
-- **Timeout Reduction:** PTT silence detection optimized from 500ms to **250ms**
-- **Enhanced Persona:** Conversational continuity, emergency protocols, inspiring new hams
-- **Field Tested:** Successfully operating on K6BJ repeater with positive operator feedback
-
-**Current Performance:**
-- **Target Response Time:** <3 seconds (PTT release → audio response)
-- **Actual Performance:** ~7 seconds average (significant improvement from 16s)
-- **Bottleneck:** LLM processing (STT and audio very fast at ~400-1200ms)
+**Operating as W6RGC/AI (Overlord) on K6BJ repeater, Santa Cruz, California.**
 
 ---
 
-### Core Capabilities
-- Speech-to-text to agent to text-to-speech pipeline using a robust batch-transcription approach.
-- digirig PTT handling and VOX support 
-- Carrier detection and transmission queuing for half-duplex operation
-- **Structured JSON Logging:** High-precision metrics (latency, STT time) and RF signal reports (RMS/Peak dBFS) for every transmission.
-- **RF Signal Reporting:** The AI is automatically fed actual signal strength data to provide authentic "loud and clear" reports.
-- `/digirig tx` manual transmit a message over-the-air
-- `/digirig doctor` service + listener diagnostics
-- `/digirig setup` prints host-aware setup commands
+## What It Does
 
----
+- **Voice QSOs** — Full-duplex conversational AI on amateur radio
+- **DTMF Tones** — Send repeater control codes via standalone CLI + TX API
+- **APRS Messages** — Read, send, and locate stations via findu.com
+- **Callsign Matching** — Fuzzy-corrects garbled STT callsigns using club roster
+- **Anti-Doubling** — Triple carrier-sense check before every transmission
+- **FCC Compliance** — Part 97.1 aware, station ID tracking, emergency gate
+- **Structured Logging** — JSON logs with metrics, signal reports, LLM-identified senders
 
-## Quick Start (no-brainer setup)
+## Architecture
 
-This plugin assumes a local Python `whisper` CLI installation for reliable, batch-based transcription of radio transmissions.
+```
+Radio RX → DigiRig USB Audio → arecord → AudioMonitor (energy/VAD)
+  → Callsign fuzzy match (SCCARC roster)
+  → Whisper STT (hot daemon or CLI fallback)
+  → normalizeSttText() → isDirectCall() check
+  → HAM_RADIO_PROMPT injection → OpenClaw agent dispatch → LLM response
+  → [SENDER:CALLSIGN] extraction → formatRadioReply() → appendCallsign()
+  → Triple carrier-sense check → PTT key → TTS → aplay → PTT unkey
 
-## 1) Install plugin
+DTMF path: dtmf-send.mjs --tx → POST /tx/raw (port 18089) → PTT + raw PCM
+```
+
+## Key Components
+
+| File | Purpose |
+|------|---------|
+| `src/runtime.ts` | Main runtime: RX/TX loop, TX API server, callsign matching |
+| `src/audio-monitor.ts` | Audio capture, VAD, energy detection, carrier sensing |
+| `src/prompt.ts` | Ham radio operator persona (15 sections) |
+| `src/ptt.ts` | PTT serial control (RTS) |
+| `src/tts.ts` | TTS synthesis + aplay playback |
+| `src/config.ts` | Zod schema for all DigiRig config |
+| `src/defaults.ts` | Default values for all config |
+| `src/channel-core.ts` | OpenClaw channel routing integration |
+| `scripts/dtmf-send.mjs` | Standalone DTMF tone CLI (zero deps) |
+| `scripts/digirig-tail.cjs` | Pretty log viewer with LLM sender attribution |
+
+## Skills
+
+| Skill | Location | Purpose |
+|-------|----------|---------|
+| `digirig-tones` | `skills/digirig-tones/` | DTMF transmission + K6BJ/AllStar codes |
+| `aprs-messages` | `~/.openclaw/workspace/skills/aprs-messages/` | APRS read/send/locate via findu.com |
+
+## Quick Start
+
+### 1) Install plugin
 ```bash
-mkdir -p ~/src
 cd ~/src
 git clone https://github.com/richcannings/digirig-openclaw-channel
 cd digirig-openclaw-channel
@@ -51,123 +67,81 @@ npm install
 openclaw plugins install -l ~/src/digirig-openclaw-channel
 ```
 
-## 2) Configure audio + PTT
+### 2) Configure audio + PTT
 ```bash
-# inspect devices
-arecord -l
-aplay -l
-
-# set DigiRig devices
 openclaw config set channels.digirig.audio.inputDevice "plughw:0,0"
 openclaw config set channels.digirig.audio.outputDevice "plughw:0,0"
-
-# If you get `arecord exited with 1` (rate inaccuracy) or capture contention,
-# use the ALSA plug wrapper with dsnoop:
-openclaw config set channels.digirig.audio.inputDevice 'plug:"dsnoop:CARD=Device,DEV=0"'
-
-# set PTT serial
 openclaw config set channels.digirig.ptt.device "/dev/ttyUSB0"
 openclaw config set channels.digirig.ptt.rts true
 ```
 
-## 3) Configure STT endpoint (Ultra-Fast Hot-Loaded Daemon)
-We use a robust batch-processing approach. To completely eliminate the 2-4 second "cold start" delay of loading the AI model for every transmission, we run a tiny Python HTTP daemon in the background that keeps the model hot in your GPU's VRAM.
-
+### 3) Set up STT daemon (recommended)
 ```bash
-# This sets up the hot-loaded daemon as a background service:
 ./scripts/setup-stt-daemon.sh
 ```
+Falls back to cold-start Whisper CLI if daemon isn't running.
 
-If you don't run this script, OpenClaw will gracefully fall back to the slow, cold-start `whisper` CLI command.
-
-*(To configure which model the daemon uses, edit the `ExecStart` line in `~/.config/systemd/user/whisper-daemon.service` and run `systemctl --user daemon-reload && systemctl --user restart whisper-daemon.service`. For RTX 3060+, `medium.en` is highly recommended).*
-
-## 4) Set callsign + policy
+### 4) Configure callsign + policy
 ```bash
 openclaw config set channels.digirig.tx.callsign "W6RGC/AI"
-openclaw config set channels.digirig.tx.policy "proactive"   # proactive | direct-only
+openclaw config set channels.digirig.tx.policy "proactive"
 openclaw config set channels.digirig.tx.aliases "Overlord,Lord,Seven,7"
 ```
 
-## 5) Latency-focused RX defaults (recommended)
+### 5) Recommended RX settings
 ```bash
-openclaw config set channels.digirig.rx.energyThreshold 0.1         # Trigger recording when you speak
-openclaw config set channels.digirig.rx.carrierSenseThreshold 0.0008 # Keep recording alive while squelch is open
-openclaw config set channels.digirig.rx.maxSilenceMs 500            # Snappy 500ms timeout after squelch closes
-openclaw config set channels.digirig.rx.busyHoldMs 800
-openclaw config set channels.digirig.rx.minSpeechMs 500
-openclaw config set channels.digirig.rx.maxRecordMs 120000
-openclaw config set channels.digirig.rx.preRollMs 300
+openclaw config set channels.digirig.rx.energyThreshold 0.1
+openclaw config set channels.digirig.rx.carrierSenseThreshold 0.0008
+openclaw config set channels.digirig.rx.maxSilenceMs 250
+openclaw config set channels.digirig.rx.preRollMs 600
+openclaw config set channels.digirig.ptt.leadMs 300
 ```
 
-## 6) Restart gateway
+### 6) Restart and test
 ```bash
 openclaw gateway restart
 ```
 
-## 7) On-air test
-Transmit:
-> “Overlord, this is Rich W6RGC. What is 2 plus 2?”
+Transmit: *"Overlord, this is [your callsign]. What is 2 plus 2?"*
 
-*Unkey the radio and wait ~500ms for the silence timeout, then ~2 seconds for the batch transcription.* You should hear a spoken response and see RX/TX lines in:
+## Log Viewer
+
 ```bash
-~/.openclaw/logs/digirig-YYYY-MM-DD.log
+node scripts/digirig-tail.cjs
 ```
 
----
+Color-coded real-time log with LLM-identified sender callsigns, signal quality, and TX/RX events.
 
 ## Commands
 
-### Manual TX
-```bash
-/digirig tx Hello from OpenClaw
-```
-
-### Doctor check
-```bash
-/digirig doctor
-```
-
-### Setup helper (auto-detect likely devices)
-```bash
-/digirig setup
-```
-
----
-
-## Troubleshooting
-
-- Check gateway/channel health:
-```bash
-openclaw status
-openclaw gateway status
-```
-
-- Check DigiRig logs (Plaintext view):
-```bash
-openclaw logs --plain | grep -i digirig | tail -n 80
-```
-
-- Query Latency Metrics (JSON view):
-```bash
-tail -n 20 ~/.openclaw/logs/digirig-$(date +%Y-%m-%d).log | jq '. | select(.type=="METRIC")'
-```
-
-- Find who has the USB audio device open (for `arecord exited with 1`):
-```bash
-fuser -v /dev/snd/*
-lsof /dev/snd/* | grep -E 'pcmC[0-9]+D[0-9]+[cp]|controlC'
-```
-
----
+| Command | Description |
+|---------|-------------|
+| `/digirig tx <message>` | Manual transmit |
+| `/digirig doctor` | Diagnostics check |
+| `/digirig setup` | Auto-detect device setup |
 
 ## Docs
-- Design notes: `docs/DESIGN.md`
-- Smoke test checklist: `docs/SMOKE_TEST.md`
-- Implementation roadmap: `ROADMAP.md`
-- Agent documentation: `AGENT.md`
 
-## Self-test command
-```bash
-npm run test:smoke
-```
+| Document | Description |
+|----------|-------------|
+| `docs/ROADMAP-CURRENT.md` | Active development roadmap with priorities |
+| `docs/DESIGN.md` | Architecture and design principles |
+| `docs/DTMF-DESIGN.md` | DTMF CLI design document |
+| `docs/SMOKE_TEST.md` | Post-update test checklist |
+| `docs/HAM_RADIO_AI_OPERATIONS.md` | Comprehensive operations guide |
+| `AGENT.md` | AI agent reference for this codebase |
+
+## Current Performance (April 2026)
+
+| Metric | Value |
+|--------|-------|
+| STT latency | 300-900ms (hot daemon) |
+| LLM dispatch | 7-15s (Sonnet), 30-60s (Opus) |
+| PTT lead time | 300ms |
+| End-of-speech detection | 250ms |
+| Anti-doubling | Triple check + 3 retries |
+| Callsign correction | Levenshtein ≤2, 141 roster entries |
+
+## License
+
+MIT

@@ -1,51 +1,56 @@
 # DigiRig Smoke Test
 
-Use this after updates to confirm the local Whisper batch pipeline + DigiRig still work.
+Run after updates to confirm everything works.
 
-## 1) Microphone Check
-
+## Pre-flight
 ```bash
-amixer -c Device sget Mic
-```
+# Check devices
+lsusb | grep -i "cp21\|digirig\|silicon"
+arecord -l
+aplay -l
+ls /dev/ttyUSB*
 
-Expected:
-- Capture channel should indicate `[on]` and a non-zero volume.
+# Check STT daemon
+curl -s http://127.0.0.1:18088/health || echo "STT daemon not running"
 
-## 2) Plugin doctor
+# Check TX API
+curl -s http://127.0.0.1:18089/tx/status || echo "TX API not running (restart gateway)"
 
-```bash
-/digirig doctor
-```
-
-Expected:
-- Provides configuration overview and device statuses.
-
-## 3) Gateway state
-
-```bash
+# Check gateway
 openclaw status
-openclaw gateway status
 ```
-Expected:
-- The DigiRig channel should say "ON" and "configured".
 
-## 4) On-air test phrase
-
-Say this over RF:
-
-> Overlord, this is Rich W6RGC. Give me a radio check and tell me what 2 plus 2 is.
-
-*Unkey the radio and wait about 1-2 seconds.*
-
-Expected:
-- RX line appears in `~/.openclaw/logs/digirig-YYYY-MM-DD.log` containing exactly what you said.
-- Short spoken TX reply is heard shortly after.
-
-## 5) Failure recovery
-
-If you encounter `arecord exited with 1`, check the ALSA configuration:
-
+## Audio Test
 ```bash
-openclaw config set channels.digirig.audio.inputDevice 'plug:"dsnoop:CARD=Device,DEV=0"'
-openclaw gateway restart
+# Record 3 seconds, verify audio capture works
+arecord -D plughw:0,0 -f S16_LE -r 16000 -c 1 -d 3 /tmp/test.wav
+aplay /tmp/test.wav
+rm /tmp/test.wav
 ```
+
+## DTMF Test
+```bash
+# Dry run (no audio)
+node scripts/dtmf-send.mjs --dry-run --verbose 767
+
+# WAV output (verify with sox)
+node scripts/dtmf-send.mjs --wav-out /tmp/dtmf-test.wav 767
+sox /tmp/dtmf-test.wav -n stat 2>&1 | head -5
+rm /tmp/dtmf-test.wav
+
+# TX API test (requires running gateway)
+node scripts/dtmf-send.mjs --tx --json --dry-run 767
+```
+
+## Log Viewer
+```bash
+node scripts/digirig-tail.cjs
+# Should show color-coded RX/TX entries
+```
+
+## On-Air Test
+1. Transmit: "Overlord, this is [callsign]. Radio check."
+2. Verify response within ~10 seconds
+3. Check log: `tail -5 ~/.openclaw/logs/digirig-$(date +%Y-%m-%d).log`
+4. Verify callsign correction in logs (if applicable)
+5. Verify sender identification in log viewer

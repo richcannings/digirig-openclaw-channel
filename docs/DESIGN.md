@@ -1,63 +1,77 @@
-# DigiRig Channel Design (Current)
+# DigiRig Channel Design
 
 ## Goal
-A minimal, reliable OpenClaw ham-radio channel with low RX-end → TX-start latency.
+A reliable OpenClaw ham-radio channel with low RX→TX latency and multi-mode output capability.
 
 ## Principles
-- Keep DigiRig plugin focused on RF-specific concerns only.
-- Reuse OpenClaw routing/session/dispatch primitives wherever possible.
-- Prefer small increments with live on-air validation after each change.
+- Keep plugin focused on RF-specific concerns only
+- Reuse OpenClaw routing/session/dispatch primitives
+- Prefer small increments with live on-air validation
+- Ham radio soul first, software engineering second
 
-## Current Architecture
-### Kept in plugin (RF-specific)
-- ALSA capture framing and VAD (`audio-monitor.ts`)
-- PTT RTS control (`ptt.ts`)
-- STT batch processing (`transcribeWithLocalWhisper` in `runtime.ts`)
-- PCM playback/TTS output glue (`tts.ts`)
+## Architecture
 
-### Reused / extracted channel-core logic
-- Inbound context creation
-- Session recording
-- Reply dispatch wrapper
+### RX Pipeline
+```
+arecord (ALSA) → AudioMonitor → utterance event
+  → Whisper STT (hot daemon port 18088, CLI fallback)
+  → normalizeSttText() → correctCallsignsInText()
+  → isDirectCall() routing check
+  → OpenClaw agent dispatch with HAM_RADIO_PROMPT
+```
 
-Implemented in: `src/channel-core.ts`
+### TX Pipeline (Voice)
+```
+LLM response → extract [SENDER:] tag → formatRadioReply()
+  → appendCallsign() → synthesizeTts() → waitForClearChannel()
+  → Triple carrier-sense check → PTT key → 300ms lead
+  → aplay → tail delay → PTT unkey → 1500ms post-mute
+```
 
-## Completed Refactor Increments
-1. **Lifecycle stability**
-   - restart-safe runtime behavior
-   - stop/start no longer poisons runtime
-2. **Plugin slimming**
-   - removed UI hints
-   - removed duplicate transcript log path
-   - removed identity alias auto-infer
-   - removed value-and-wait policy mode
-   - removed closing/fallback special-casing and raw/verbose transcript noise
-3. **STT Simplification**
-   - removed complex `Transcriber` WebSocket streaming
-   - migrated entirely to reliable, single-shot batch processing with local Whisper
-4. **Latency tuning & VAD**
-   - implemented a dual-tier VAD system separating `energyThreshold` (speech) and `carrierSenseThreshold` (static).
-   - reduced `maxSilenceMs` to 500ms, as the system now instantly recognizes a hardware squelch drop.
-   - synthesized audio is generated *before* keying the PTT relay, avoiding dead-air transmissions.
-   - practical RX settings tuned for ~2-3s observed turnaround from PTT-unkey to reply.
+### TX Pipeline (Raw Audio / DTMF)
+```
+HTTP POST /tx/raw (port 18089) → waitForClearChannel()
+  → Triple carrier-sense → PTT key → 300ms lead
+  → aplay raw PCM → tail delay → PTT unkey
+```
 
-## Policy Modes (current)
-- `proactive`
-- `direct-only`
+### Anti-Doubling (3 checks)
+1. **Holdoff wait** — Poll `getBusy()` until 800ms silence (timeout → drop)
+2. **Final energy** — `isCarrierPresent()` right before PTT key
+3. **Lead listen** — Sample carrier during 300ms lead delay, abort if detected
+- Up to 3 attempts with 1200ms backoff between retries
 
-## Operational Notes
-- RX/TX transcript remains in `~/.openclaw/logs/digirig-YYYY-MM-DD.log` (Structured JSON-L format).
-- `/digirig tx` is preserved.
-- PTT unkey is protected in `finally`.
-- Microphone is explicitly unmuted (`amixer set Mic cap`) on startup to prevent `arecord` failures
+### Callsign Processing
+1. Post-STT: fuzzy match against SCCARC roster + heard callsigns (Levenshtein ≤2)
+2. Post-LLM: extract `[SENDER:CALLSIGN]` tag from response, log as RX_SENDER
+3. Log viewer uses LLM-identified sender, falls back to regex
 
-## Known Practical Latency Budget
-Observed ~1.5-2s is typically dominated by:
-- 0.5s `maxSilenceMs` to ensure the squelch is fully dropped
-- hot-loaded `whisper-daemon` HTTP execution (0.2s - 0.8s)
-- model + dispatch latency
-- TTS generation (0.5s - 1s)
-- PTT lead/audio start
+## Plugin Boundary
 
-## Planning Notes
-Execution sequencing and future milestones are tracked in `ROADMAP.md` to keep this document focused on current architecture and invariants.
+### In plugin (RF-specific)
+- ALSA capture/playback
+- PTT serial control
+- Audio energy detection and VAD
+- STT transcription (Whisper)
+- Carrier sensing and anti-doubling
+- TX API server (port 18089)
+- Callsign fuzzy matching
+- Structured logging
+
+### In OpenClaw core (reused)
+- Agent routing and dispatch
+- TTS synthesis
+- Session management
+- Tool execution (exec, web_fetch, etc.)
+- Skill loading
+
+## Config Schema (DigirigConfig)
+- `audio` — input/output device, sample rate
+- `ptt` — serial device, RTS, lead/tail timing
+- `rx` — energy thresholds, silence/speech timing, carrier sense, pre-roll
+- `tx` — callsign, policy, aliases, max TX duration
+- `stt` — local Whisper config (daemon, CLI, model, language)
+
+## Ports
+- **18088** — Whisper STT hot daemon
+- **18089** — TX API (raw audio with PTT control)

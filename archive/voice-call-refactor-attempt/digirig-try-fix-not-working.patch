@@ -1,0 +1,230 @@
+diff --git a/.openclaw/extensions/digirig/index.ts b/.openclaw/extensions/digirig/index.ts
+index d9015ad..fdb7581 100644
+--- a/.openclaw/extensions/digirig/index.ts
++++ b/.openclaw/extensions/digirig/index.ts
+@@ -55,6 +55,29 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
+       configured: Boolean(account.stt?.streamUrl?.trim()),
+     }),
+   },
++  status: {
++    defaultRuntime: {
++      accountId: DEFAULT_ACCOUNT_ID,
++      running: false,
++      connected: false,
++      lastConnectedAt: null,
++      lastInboundAt: null,
++      lastEventAt: null,
++      lastError: null,
++    },
++    buildAccountSnapshot: ({ account, runtime }) => ({
++      accountId: DEFAULT_ACCOUNT_ID,
++      name: account.name,
++      enabled: account.enabled ?? true,
++      configured: Boolean(account.stt?.streamUrl?.trim()),
++      running: runtime?.running ?? false,
++      connected: runtime?.connected ?? false,
++      lastConnectedAt: runtime?.lastConnectedAt ?? null,
++      lastInboundAt: runtime?.lastInboundAt ?? null,
++      lastEventAt: runtime?.lastEventAt ?? null,
++      lastError: runtime?.lastError ?? null,
++    }),
++  },
+   outbound: {
+     deliveryMode: "direct",
+     sendText: async ({ text }) => {
+diff --git a/.openclaw/extensions/digirig/openclaw.plugin.json b/.openclaw/extensions/digirig/openclaw.plugin.json
+index 85d8a49..ecb3b2d 100644
+--- a/.openclaw/extensions/digirig/openclaw.plugin.json
++++ b/.openclaw/extensions/digirig/openclaw.plugin.json
+@@ -2,14 +2,18 @@
+   "id": "digirig",
+   "channels": ["digirig"],
+   "uiHints": {
++    "tx.callsign": {
++      "label": "TX Callsign",
++      "help": "Appended to final responses if not already present."
++    },
+     "audio.inputDevice": {
+       "label": "Audio Input Device",
+-      "placeholder": "hw:2,0",
++      "placeholder": "plughw:2,0",
+       "help": "ALSA capture device for RX (arecord)."
+     },
+     "audio.outputDevice": {
+       "label": "Audio Output Device",
+-      "placeholder": "hw:2,0",
++      "placeholder": "plughw:2,0",
+       "help": "ALSA playback device for TX (aplay)."
+     },
+     "ptt": {
+@@ -28,10 +32,6 @@
+     "ptt.tailMs": {
+       "label": "PTT Tail (ms)"
+     },
+-    "tx.callsign": {
+-      "label": "TX Callsign",
+-      "help": "Appended to final responses if not already present."
+-    },
+     "rx.energyThreshold": {
+       "label": "RX Energy Threshold"
+     },
+@@ -113,6 +113,13 @@
+     "additionalProperties": false,
+     "properties": {
+       "enabled": { "type": "boolean" },
++      "tx": {
++        "type": "object",
++        "additionalProperties": false,
++        "properties": {
++          "callsign": { "type": "string" }
++        }
++      },
+       "audio": {
+         "type": "object",
+         "additionalProperties": false,
+@@ -146,13 +153,6 @@
+           "busyHoldMs": { "type": "integer", "minimum": 50 }
+         }
+       },
+-      "tx": {
+-        "type": "object",
+-        "additionalProperties": false,
+-        "properties": {
+-          "callsign": { "type": "string" }
+-        }
+-      },
+       "stt": {
+         "type": "object",
+         "additionalProperties": false,
+diff --git a/.openclaw/extensions/digirig/src/config.test.ts b/.openclaw/extensions/digirig/src/config.test.ts
+index 7d190c3..d23d42c 100644
+--- a/.openclaw/extensions/digirig/src/config.test.ts
++++ b/.openclaw/extensions/digirig/src/config.test.ts
+@@ -9,8 +9,8 @@ describe("DigirigConfigSchema", () => {
+ 
+   it("applies defaults", () => {
+     const result = DigirigConfigSchema.parse({ stt: {} });
+-    expect(result.audio.inputDevice).toBe("hw:2,0");
+-    expect(result.audio.outputDevice).toBe("hw:2,0");
++    expect(result.audio.inputDevice).toBe("plughw:2,0");
++    expect(result.audio.outputDevice).toBe("plughw:2,0");
+     expect(result.ptt.device).toBe("/dev/ttyUSB0");
+     expect(result.rx.frameMs).toBe(20);
+     expect(result.stt.streamIntervalMs).toBe(800);
+diff --git a/.openclaw/extensions/digirig/src/defaults.ts b/.openclaw/extensions/digirig/src/defaults.ts
+index b7989c6..8809a45 100644
+--- a/.openclaw/extensions/digirig/src/defaults.ts
++++ b/.openclaw/extensions/digirig/src/defaults.ts
+@@ -1,4 +1,4 @@
+-export const DEFAULT_AUDIO_DEVICE = "hw:2,0";
++export const DEFAULT_AUDIO_DEVICE = "plughw:2,0";
+ export const DEFAULT_AUDIO_SAMPLE_RATE = 16000;
+ 
+ export const DEFAULT_PTT_DEVICE = "/dev/ttyUSB0";
+diff --git a/.openclaw/extensions/digirig/src/runtime.ts b/.openclaw/extensions/digirig/src/runtime.ts
+index b7e2031..9e88f6f 100644
+--- a/.openclaw/extensions/digirig/src/runtime.ts
++++ b/.openclaw/extensions/digirig/src/runtime.ts
+@@ -119,11 +119,33 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
+       return { stop: () => {} };
+     }
+ 
++    const updateStatus = (patch: Partial<{
++      running: boolean;
++      connected: boolean;
++      lastConnectedAt: number | null;
++      lastDisconnect: { at: number; error?: string } | null;
++      lastStartAt: number | null;
++      lastStopAt: number | null;
++      lastInboundAt: number | null;
++      lastEventAt: number | null;
++      lastError: string | null;
++    }>) => {
++      ctx.setStatus({
++        ...ctx.getStatus(),
++        accountId: ctx.accountId,
++        ...patch,
++      });
++    };
++
+     audioMonitor.on("log", (msg) => ctx.log?.debug?.(`[digirig] ${msg}`));
+-    audioMonitor.on("error", (err) => ctx.log?.error?.(`[digirig] ${String(err)}`));
+-    audioMonitor.on("recording-start", (evt) =>
+-      ctx.log?.info?.(`[digirig] RX start (energy=${evt?.energy?.toFixed?.(4) ?? "?"})`),
+-    );
++    audioMonitor.on("error", (err) => {
++      ctx.log?.error?.(`[digirig] ${String(err)}`);
++      updateStatus({ lastError: String(err) });
++    });
++    audioMonitor.on("recording-start", (evt) => {
++      ctx.log?.info?.(`[digirig] RX start (energy=${evt?.energy?.toFixed?.(4) ?? "?"})`);
++      updateStatus({ lastEventAt: Date.now() });
++    });
+     let lastRxEndAt = 0;
+     let recordingFrames: Buffer[] = [];
+     let streamTimer: NodeJS.Timeout | null = null;
+@@ -223,6 +245,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
+         if (!text.trim()) {
+           return;
+         }
++        updateStatus({ lastInboundAt: Date.now() });
+ 
+         const cfg = runtime.config.loadConfig();
+         const routeStartAt = Date.now();
+@@ -356,15 +379,29 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
+     try {
+       await whisperServer.ensureRunning();
+     } catch (err) {
+-      ctx.log?.error?.(`[digirig] whisper-server ensure failed: ${String(err)}`);
++      const errText = String(err);
++      ctx.log?.error?.(`[digirig] whisper-server ensure failed: ${errText}`);
++      updateStatus({ lastError: errText });
+     }
+     audioMonitor.start();
++    updateStatus({
++      running: true,
++      connected: true,
++      lastConnectedAt: Date.now(),
++      lastStartAt: Date.now(),
++      lastError: null,
++    });
+ 
+     return {
+       stop: () => {
+         stopped = true;
+         audioMonitor.stop();
+         void whisperServer?.stop();
++        updateStatus({
++          running: false,
++          connected: false,
++          lastStopAt: Date.now(),
++        });
+       },
+     };
+   };
+diff --git a/TOOLS.md b/TOOLS.md
+index b05cac4..70a2ce1 100644
+--- a/TOOLS.md
++++ b/TOOLS.md
+@@ -16,7 +16,7 @@ Things like:
+ ## DigiRig
+ 
+ - TX callsign: W6RGC/AI ("Whiskey Six Romeo Golf Charlie stroke Alpha India").
+-- Reply on DigiRig when asked.
++- TX allowed. End transmissions with callsign "W6RGC/AI" when active.
+ 
+ ## Examples
+ 
+diff --git a/USER.md b/USER.md
+index 6f3ac29..909a311 100644
+--- a/USER.md
++++ b/USER.md
+@@ -6,7 +6,7 @@
+ - **What to call them:** Rich
+ - **Pronouns:** *(optional)*
+ - **Timezone:** PST (America/Los_Angeles)
+-- **Notes:** Prefers auto-transcription of WhatsApp voice notes. Located in Santa Cruz, California. Callsign for DigiRig TX: W6RGC/AI ("Whiskey Six Romeo Golf Charlie stroke Alpha India"). Reply on DigiRig when asked.
++- **Notes:** Prefers auto-transcription of WhatsApp voice notes. Located in Santa Cruz, California. Callsign for DigiRig TX: W6RGC/AI ("Whiskey Six Romeo Golf Charlie stroke Alpha India"). TX allowed; end transmissions with "W6RGC/AI" when active.
+ 
+ ## Context
+ 
