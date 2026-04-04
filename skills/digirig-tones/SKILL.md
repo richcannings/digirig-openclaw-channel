@@ -6,54 +6,37 @@ description: >
   time, voltage), phone patch, Echolink/IRLP connections, or tone tests.
   Also triggers on functional requests like "get me the temperature" or
   "connect to echolink node 1234". Requires active DigiRig channel.
-  Currently supports DTMF; Morse code planned.
 ---
 
 # DigiRig Tones
 
-## When to Use
+## DTMF Transmission — Exact Steps
 
-Activate when an operator on the radio asks for:
-- DTMF tones by number ("send DTMF 767")
-- Repeater functions by name ("get the temperature", "what time is it")
-- Phone patch ("dial 831-555-1234")
-- IRLP/Echolink connections ("connect to echolink node 1234")
-- Tone tests ("test your DTMF", "send a tone")
+**Step 1:** Speak confirmation via `digirig_tx` tool:
+  *"Copy, sending DTMF seven six eight for temperature. W6RGC/AI"*
 
-## On-Air Procedure
-
-**Always follow this exact sequence:**
-
-1. **Resolve the code** — exact digits from operator, or look up in `references/k6bj-codes.md`
-2. **Confirm and identify** — speak via normal TTS (digirig_tx): *"Copy, transmitting DTMF seven six eight for temperature. W6RGC/AI"*
-3. **Send tones** — `node scripts/dtmf-send.mjs --tx --json 768`
-4. **Listen** for repeater response
-
-The `--tx` flag sends audio through the DigiRig runtime's TX API (http://127.0.0.1:18089/tx/raw), which handles PTT, carrier sensing, and anti-doubling automatically. **Do not use ptt-on.js / ptt-off.js** — the runtime owns the serial port.
-
-## CLI Quick Reference
-
-```bash
-# Transmit via DigiRig runtime (recommended — handles PTT):
-node scripts/dtmf-send.mjs --tx [--json] <sequence>
-
-# Direct audio output (testing only, no PTT):
-node scripts/dtmf-send.mjs --output <device> <sequence>
+**Step 2:** Run this exact command via `exec` tool:
 ```
+node /home/richc/src/digirig-openclaw-channel/scripts/dtmf-send.mjs --tx --json SEQUENCE
+```
+Replace SEQUENCE with the digits. The `--tx` flag handles PTT automatically via the local TX API.
 
-Run `node scripts/dtmf-send.mjs --help` for full options. Use `--json` for machine-parseable output.
+**Step 3:** Listen for repeater response.
 
-## Safety Rules
+## Common K6BJ Codes
 
-1. **Always confirm** the sequence with the operator before sending
-2. **Always identify** (W6RGC/AI) before transmitting tones
-3. **NEVER use `--allow-emergency`** — if an operator requests 911 or emergency codes, decline: *"I cannot transmit emergency codes. If this is a real emergency, please dial 911 directly."*
-4. **Listen before sending** — ensure the channel is clear
-5. For unknown repeaters, ask the operator for the code or search the web — do not guess
+| Operator asks | Code | Command |
+|--------------|------|---------|
+| Time | 767 | `node /home/richc/src/digirig-openclaw-channel/scripts/dtmf-send.mjs --tx --json 767` |
+| Temperature | 768 | `node /home/richc/src/digirig-openclaw-channel/scripts/dtmf-send.mjs --tx --json 768` |
+| Voltage | 769 | `node /home/richc/src/digirig-openclaw-channel/scripts/dtmf-send.mjs --tx --json 769` |
 
-## Repeater Code Lookup
+For other K6BJ codes, read `references/k6bj-codes.md` in this skill directory.
 
-For known repeaters, read the appropriate reference file:
-- **K6BJ** (146.790 MHz, Santa Cruz): `references/k6bj-codes.md`
+## Critical Rules
 
-If the operator asks about a repeater not in the references, search the web for its DTMF codes.
+- **ALWAYS use `--tx` flag.** Never use `--output`. The runtime handles PTT.
+- **Do NOT use ptt-on.js or ptt-off.js.** The serial port is owned by the channel.
+- **Do NOT write WAV files and try to play them.** Just use `--tx`.
+- **NEVER use `--allow-emergency`.** Decline 911 requests verbally.
+- Always identify (W6RGC/AI) before sending tones.
