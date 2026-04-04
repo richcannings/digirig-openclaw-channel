@@ -65,6 +65,15 @@ openclaw plugins install -l ~/src/digirig-openclaw-channel
 
 ### Configure
 
+The easiest way: let the plugin auto-detect your hardware:
+
+```bash
+/digirig setup    # detects audio devices, PTT serial, prints config commands
+/digirig doctor   # verifies everything is working
+```
+
+Or configure manually:
+
 ```bash
 # Audio devices (find yours with: arecord -l && aplay -l)
 openclaw config set channels.digirig.audio.inputDevice "plughw:0,0"
