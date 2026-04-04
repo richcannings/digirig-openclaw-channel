@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
+import { createServer, type Server as HttpServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ChannelGatewayContext as ChannelGatewayStartContext } from "openclaw/plugin-sdk/channel-runtime";
@@ -489,6 +490,116 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     });
 
     audioMonitor.start();
+
+    // ── Raw audio TX endpoint ──────────────────────────────────────
+    // POST /tx/raw  — body: raw PCM (S16_LE, mono)
+    //   Query params: sampleRate (default: 16000)
+    //   Keys PTT, plays audio through existing controller, unkeys PTT.
+    //   Used by dtmf-send and other CLI tools that generate raw PCM.
+    // GET  /tx/status — health check, returns {"ok":true,"txInProgress":...}
+    const TX_API_PORT = 18089;
+    let txApiServer: HttpServer | null = null;
+
+    const playRawAudio = async (pcm: Buffer, sampleRate: number): Promise<void> => {
+      if (!config.ptt.rts) throw new Error("PTT disabled");
+
+      outboundQueue = outboundQueue.then(async () => {
+        txInProgress = true;
+        try {
+          const bytesPerMs = sampleRate * 2 / 1000;
+          const audioMs = bytesPerMs > 0 ? Math.ceil(pcm.length / bytesPerMs) : 0;
+          const muteMs = Math.max(0, config.ptt.leadMs + config.ptt.tailMs + audioMs + 500);
+
+          const waitResult = await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 60000);
+          if (waitResult === "timeout") throw new Error("Channel busy for 60s");
+
+          if (audioMonitor.isCarrierPresent()) throw new Error("Carrier detected at final check");
+
+          await ptt.open();
+          await ptt.setTx(true);
+
+          if (config.ptt.leadMs > 0) {
+            const listenMs = Math.max(30, config.ptt.leadMs - 30);
+            await delay(listenMs);
+            if (audioMonitor.isCarrierPresent() || audioMonitor.getBusy()) {
+              await ptt.setTx(false);
+              throw new Error("Carrier detected during lead delay");
+            }
+            const remaining = config.ptt.leadMs - listenMs;
+            if (remaining > 0) await delay(remaining);
+          }
+
+          audioMonitor.muteFor(muteMs);
+          try {
+            await playPcm({
+              device: config.audio.outputDevice,
+              sampleRate,
+              channels: 1,
+              pcm,
+              signal: undefined,
+            });
+          } finally {
+            if (config.ptt.tailMs > 0) await delay(config.ptt.tailMs);
+            await ptt.setTx(false);
+            audioMonitor.muteFor(1500);
+          }
+
+          await logEvent({ type: "TX_RAW", audioMs, sampleRate });
+        } catch (err) {
+          try { await ptt.setTx(false); } catch { /* ignore */ }
+          audioMonitor.muteFor(1500);
+          throw err;
+        } finally {
+          txInProgress = false;
+        }
+      });
+      await outboundQueue;
+    };
+
+    txApiServer = createServer(async (req, res) => {
+      try {
+        if (req.method === "GET" && req.url?.startsWith("/tx/status")) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, txInProgress }));
+          return;
+        }
+
+        if (req.method === "POST" && req.url?.startsWith("/tx/raw")) {
+          const url = new URL(req.url, `http://localhost:${TX_API_PORT}`);
+          const sampleRate = Number(url.searchParams.get("sampleRate") || config.audio.sampleRate);
+
+          const chunks: Buffer[] = [];
+          for await (const chunk of req) chunks.push(chunk as Buffer);
+          const pcm = Buffer.concat(chunks);
+
+          if (pcm.length === 0) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "Empty body" }));
+            return;
+          }
+
+          await playRawAudio(pcm, sampleRate);
+          const audioMs = Math.ceil(pcm.length / (sampleRate * 2 / 1000));
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, audioMs, sampleRate }));
+          return;
+        }
+
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Not found" }));
+      } catch (err: any) {
+        ctx.log?.error?.(`[digirig] TX API error: ${String(err)}`);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: String(err?.message || err) }));
+        }
+      }
+    });
+
+    txApiServer.listen(TX_API_PORT, "127.0.0.1", () => {
+      ctx.log?.info?.(`[digirig] TX API listening on http://127.0.0.1:${TX_API_PORT}`);
+    });
+
     updateStatus({
       running: true,
       connected: true,
@@ -505,6 +616,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       await waitForAbort(runLoopAbort.signal);
     } finally {
       ctx.abortSignal.removeEventListener("abort", abortRunLoop);
+      txApiServer?.close();
+      txApiServer = null;
       started = false;
       audioMonitor.stop();
       runLoopAbort = null;

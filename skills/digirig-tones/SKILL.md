@@ -25,30 +25,25 @@ Activate when an operator on the radio asks for:
 **Always follow this exact sequence:**
 
 1. **Resolve the code** — exact digits from operator, or look up in `references/k6bj-codes.md`
-2. **Confirm and identify** — speak via normal TTS: *"Copy, transmitting DTMF seven six eight for temperature. W6RGC/AI"*
-3. **Key PTT** — `node ptt-on.js /dev/ttyUSB1`
-4. **Send tones** — `node scripts/dtmf-send.mjs --output plughw:0,0 --lead-ms 300 768`
-5. **Unkey PTT** — `node ptt-off.js /dev/ttyUSB1`
-6. **Listen** for repeater response
+2. **Confirm and identify** — speak via normal TTS (digirig_tx): *"Copy, transmitting DTMF seven six eight for temperature. W6RGC/AI"*
+3. **Send tones** — run the CLI with `--tx` flag: `node scripts/dtmf-send.mjs --tx --json 768`
+4. **Listen** for repeater response
 
-**Resolve paths relative to this skill directory for scripts, and relative to the workspace for ptt-on.js / ptt-off.js.**
+The `--tx` flag sends the audio through the DigiRig runtime's TX API, which handles PTT keying/unkeying, carrier sensing, and anti-doubling automatically. **Do not use ptt-on.js / ptt-off.js** — the runtime owns the serial port.
 
 ## CLI Quick Reference
 
 ```bash
-node scripts/dtmf-send.mjs --output <device> [--lead-ms <ms>] [--tone-ms <ms>] [--spacing-ms <ms>] [--voice-scale <f>] [--json] <sequence>
+# Transmit via DigiRig runtime (recommended — handles PTT automatically):
+node scripts/dtmf-send.mjs --tx [--json] <sequence>
+
+# Direct audio output (for testing without PTT):
+node scripts/dtmf-send.mjs --output <device> <sequence>
 ```
 
 Run `node scripts/dtmf-send.mjs --help` for full options.
 
-Use `--json` for machine-parseable output. Use `--lead-ms 300` to match PTT settling time.
-
-## Config Values to Pass Through
-
-Read these from the DigiRig channel config:
-- `--output` ← `channels.digirig.audio.outputDevice` (currently `plughw:0,0`)
-- `--lead-ms` ← `channels.digirig.ptt.leadMs` (currently `300`)
-- PTT device ← `channels.digirig.ptt.device` (currently `/dev/ttyUSB1`)
+Use `--json` for machine-parseable output. Use `--tx` for on-air transmission.
 
 ## Safety Rules
 
