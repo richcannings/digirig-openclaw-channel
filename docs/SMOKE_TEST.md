@@ -49,7 +49,7 @@ node scripts/digirig-tail.cjs
 ```
 
 ## On-Air Test
-1. Transmit: "Overlord, this is [callsign]. Radio check."
+1. Transmit: "Seven, this is [callsign]. Radio check."
 2. Verify response within ~10 seconds
 3. Check log: `tail -5 ~/.openclaw/logs/digirig-$(date +%Y-%m-%d).log`
 4. Verify callsign correction in logs (if applicable)

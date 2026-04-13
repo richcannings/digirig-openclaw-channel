@@ -49,19 +49,19 @@ An operator on the air asks the AI to send DTMF tones. The request may come in s
 
 ### 1. Exact sequence provided
 ```
-Operator: "Overlord, send DTMF 767"
+Operator: "Seven, send DTMF 767"
 ```
 The AI knows the exact digits. Confirm and send.
 
 ### 2. Functional request — AI looks up the code
 ```
-Operator: "Overlord, get me the temperature from the K6BJ repeater"
+Operator: "Seven, get me the temperature from the K6BJ repeater"
 ```
 The AI knows (from its skill knowledge base / `references/k6bj-codes.md`) that K6BJ's temperature code is `768`. It looks up the code, confirms what it's doing, and sends.
 
 ### 3. Unknown code — AI researches
 ```
-Operator: "Overlord, send the autopatch code for the W6QAP repeater"
+Operator: "Seven, send the autopatch code for the W6QAP repeater"
 ```
 The AI doesn't have W6QAP codes in its knowledge base. It searches the web or asks the operator for the specific code before transmitting.
 

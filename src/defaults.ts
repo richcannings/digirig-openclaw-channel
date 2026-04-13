@@ -18,7 +18,7 @@ export const DEFAULT_RX_CARRIER_SENSE_THRESHOLD = 0.0008;
 
 export const DEFAULT_TX_CALLSIGN = "N0CALL/AI";
 export const DEFAULT_TX_POLICY = "direct-only" as const;
-export const DEFAULT_TX_ALIASES = "Overlord,Lord,Seven,7";
+export const DEFAULT_TX_ALIASES = "Seven,7,Overlord";
 export const DEFAULT_TX_MAX_DURATION_MS = 120000;
 export const DEFAULT_TX_COURTESY_DELAY_MS = 2000;
 

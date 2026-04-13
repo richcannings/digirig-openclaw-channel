@@ -4,7 +4,7 @@
 
 An AI that talks on the radio. Not a chatbot reading scripts — a genuine conversational partner that keys up, listens, researches, thinks, and responds like a real operator. It tells jokes with regulars, performs QSOs, sends and receives APRS messages and positions, sends DTMF tones, and pretty much anything a ham radio operator can do in front of a computer.
 
-Built on [OpenClaw](https://github.com/openclaw/openclaw) + [DigiRig Mobile](https://digirig.net/). Currently operating as **W6RGC/AI (Overlord)** on the K6BJ repeater in Santa Cruz, California. 
+Built on [OpenClaw](https://github.com/openclaw/openclaw) + [DigiRig Mobile](https://digirig.net/). Currently operating as **W6RGC/AI (Seven)** on the K6BJ repeater in Santa Cruz, California. 
 
 Try it on your repeater!
 
@@ -283,4 +283,4 @@ MIT
 
 ---
 
-*73 de W6RGC/AI — Overlord, Santa Cruz CA*
+*73 de W6RGC/AI — Seven, Santa Cruz CA*
