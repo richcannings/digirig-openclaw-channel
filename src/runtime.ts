@@ -346,34 +346,21 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
               continue;
             }
 
-            // PTT key-up — but we split the lead delay to insert Check 3
+            // Mute the audio monitor BEFORE keying the PTT.
+            // A half-duplex radio cannot hear anything while keyed up, and the
+            // electrical pop of keying the PTT will trigger a false positive carrier.
+            audioMonitor.muteFor(muteMs);
+
+            // PTT key-up
             await ptt.open();
             await ptt.setTx(true);
             hooks?.onPttKeyed?.(Date.now());
 
-            // Check 3: Listen during lead delay. Key is up but audio hasn't
-            // started yet — if we detect carrier now, someone beat us. Abort.
             if (config.ptt.leadMs > 0) {
-              // Wait most of the lead time, then sample
-              const listenMs = Math.max(30, config.ptt.leadMs - 30);
-              await delay(listenMs);
-
-              // Clear the mute briefly to let the monitor hear the channel
-              // (it's not muted yet — muteFor hasn't been called)
-              if (audioMonitor.isCarrierPresent() || audioMonitor.getBusy()) {
-                logger?.info?.(`[digirig] TX aborted mid-key: carrier detected during lead delay (attempt ${attempt}/${MAX_TX_ATTEMPTS}, energy=${audioMonitor.getLastEnergy().toFixed(6)})`);
-                await ptt.setTx(false);
-                await delay(BACKOFF_MS);
-                continue;
-              }
-
-              // Remaining lead delay
-              const remaining = config.ptt.leadMs - listenMs;
-              if (remaining > 0) await delay(remaining);
+              await delay(config.ptt.leadMs);
             }
 
             // All clear — commit to transmission
-            audioMonitor.muteFor(muteMs);
             try {
               hooks?.onAudioStart?.(Date.now());
               await playPcm({
