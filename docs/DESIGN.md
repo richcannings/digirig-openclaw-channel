@@ -11,35 +11,24 @@ A reliable OpenClaw ham-radio channel with low RX→TX latency and multi-mode ou
 
 ## Architecture
 
-### RX Pipeline
+### Pipeline Architecture (Threaded)
+The runtime now uses an event-driven async queue architecture to decouple capture from processing.
+See [PIPELINE-THREADING.md](./PIPELINE-THREADING.md) for the full breakdown and SVG diagram.
+
 ```
-arecord (ALSA) → AudioMonitor → utterance event
-  → Whisper STT (hot daemon port 18088, CLI fallback)
-  → normalizeSttText() → correctCallsignsInText()
-  → isDirectCall() routing check
-  → OpenClaw agent dispatch with HAM_RADIO_PROMPT
+[RX Audio Worker] → (AudioQueue) → [STT Worker] → (AgentQueue) → [Agent Worker] → (TxQueue) → [TX Worker]
 ```
 
-### TX Pipeline (Voice)
-```
-LLM response → extract [SENDER:] tag → formatRadioReply()
-  → appendCallsign() → synthesizeTts() → waitForClearChannel()
-  → Triple carrier-sense check → PTT key → 300ms lead
-  → aplay → tail delay → PTT unkey → 1500ms post-mute
-```
+1. **RX Worker**: Captures audio continuously, pushes to queue.
+2. **STT Worker**: Pops audio, runs Whisper, corrects callsigns, pushes text to queue.
+3. **Agent Worker**: Pops text, dispatches LLM, handles async tools and audio acks, pushes response to queue.
+4. **TX Worker**: Serializes all PTT events. Applies courtesy delays and anti-doubling, keys PTT, plays PCM, unkeys.
 
-### TX Pipeline (Raw Audio / DTMF)
-```
-HTTP POST /tx/raw (port 18089) → waitForClearChannel()
-  → Triple carrier-sense → PTT key → 300ms lead
-  → aplay raw PCM → tail delay → PTT unkey
-```
-
-### Anti-Doubling (3 checks)
-1. **Holdoff wait** — Poll `getBusy()` until 800ms silence (timeout → drop)
-2. **Final energy** — `isCarrierPresent()` right before PTT key
-3. **Lead listen** — Sample carrier during 300ms lead delay, abort if detected
-- Up to 3 attempts with 1200ms backoff between retries
+### Anti-Doubling (2 checks + Courtesy Delay)
+1. **Courtesy Delay** — Wait `courtesyDelayMs` (default 2s) after last RX before keying up.
+2. **Final energy** — `isCarrierPresent()` right before PTT key (last 50ms).
+- Up to 3 attempts with 1200ms backoff between retries.
+- Mutes the audio monitor *before* keying to ignore the hardware electrical pop.
 
 ### Callsign Processing
 1. Post-STT: fuzzy match against SCCARC roster + heard callsigns (Levenshtein ≤2)

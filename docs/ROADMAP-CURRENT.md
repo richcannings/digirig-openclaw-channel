@@ -3,6 +3,8 @@
 
 ## ✅ Completed (April 12, 2026)
 
+- [x] **Pipeline Threading (P1-2)** — Replaced monolithic loop with 4 asynchronous queue workers (`src/pipeline/queue.ts`).
+- [x] **Async Audio Ack** — Automatic CW "AI" tone plays before tool execution via Agent Loop middleware.
 - [x] **Faster Model for Radio Sessions (P1-1)** — Switched from Opus to Gemini 3.1 Pro Preview for speed.
 - [x] **STT Callsign Fuzzy Matching (P1-2)** — Implemented via Levenshtein matching against SCCARC roster.
 - [x] **FCC ID Timer (P2-2)** — 10-minute auto-ID interval tracked in `runtime.ts`.
@@ -27,24 +29,6 @@
 **Impact:** High — radio session struggles to call `exec` → `dtmf-send --tx`  
 **Options:** A) First-class tool, B) Auto-detect from response, C) Rely strictly on the `digirig-tones` skill
 **Status:** Skill path chosen and enforced in `prompt.ts`. Monitoring reliability.
-
-### P1-2: Pipeline Threading
-**Impact:** High — dropped transcriptions when messages arrive during STT processing  
-**Description:** Current pipeline is sequential: RX → STT → LLM → TTS → TX. If a new transmission arrives while STT is processing the previous one, it gets dropped. Need concurrent capture with queued processing.  
-**Architecture:**
-```
-RX Audio → [Capture Queue] → STT Worker(s) → [Text Queue] → LLM → [Output Queue]
-                                                                         ├→ TTS → TX (voice)
-                                                                         ├→ dtmf-send (DTMF)
-                                                                         ├→ Direwolf (APRS packets)
-                                                                         └→ morse-send (CW)
-```
-- Capture thread never blocks — always recording
-- STT processes utterances from queue
-- LLM processes text segments from queue
-- Output router dispatches to appropriate renderer
-- This architecture also enables the multi-mode output (voice, DTMF, APRS, CW) from a single pipeline  
-**Status:** Design needed. This is foundational.
 
 ---
 
