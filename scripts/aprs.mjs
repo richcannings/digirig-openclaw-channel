@@ -2,7 +2,7 @@
 // aprs — Query and interact with APRS via findu.com.
 // No dependencies. Uses built-in fetch.
 
-const BASE = "https://www.findu.com/cgi-bin";
+const BASE = "http://www.findu.com/cgi-bin";
 
 function parseArgs(argv) {
   const args = {
