@@ -20,6 +20,7 @@ import {
   DEFAULT_TX_POLICY,
   DEFAULT_TX_ALIASES,
   DEFAULT_TX_MAX_DURATION_MS,
+  DEFAULT_TX_COURTESY_DELAY_MS,
   } from "./defaults.js";
 
   const DigirigAudioSchema = z
@@ -74,6 +75,7 @@ import {
       .default(DEFAULT_TX_POLICY),
     aliases: z.string().default(DEFAULT_TX_ALIASES),
     maxTxMs: z.number().int().min(1000).default(DEFAULT_TX_MAX_DURATION_MS),
+    courtesyDelayMs: z.number().int().min(0).default(DEFAULT_TX_COURTESY_DELAY_MS),
   })
   .default({});
 

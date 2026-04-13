@@ -75,3 +75,8 @@ archive/
 - Don't assume the AI can execute shell commands reliably from the radio session — tool calling is inconsistent
 - Don't hardcode callsigns — use config values
 - Don't log personal info from the SCCARC roster (it contains only callsigns + names, not contact info)
+
+## Hard Operational Constraints
+- **DTMF Generation**: Never route DTMF through TTS. It is proven to fail. Always use the `dtmf-send.mjs` script via the `digirig-tones` skill to inject raw PCM.
+- **Over-Response Bug**: The system sometimes responds too often and interrupts third-party conversations. We need to improve the conversational continuity logic so it only transmits when directly addressed or contextually required, rather than triggering on unrelated traffic.
+- **Tactical Callsigns**: Never assign tactical callsigns (e.g., "Bridges"). Operators find them confusing. Only use them if explicitly requested.

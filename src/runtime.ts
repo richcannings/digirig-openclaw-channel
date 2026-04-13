@@ -274,6 +274,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let lastRxEndReason: string | null = null;
   let lastRxSilenceMs = 0;
   let lastRxDurationMs = 0;
+  let lastIdTxAt = Date.now();
+  let lastTxAt = 0;
+  let idTimer: NodeJS.Timeout | null = null;
 
   const logTranscript = async (speaker: "RX" | "TX", text: string, sessionId?: number, extraProps?: Record<string, any>) => {
     if (!text.trim()) return;
@@ -319,11 +322,26 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
               break;
             }
 
-            // Check 2: Final carrier check right before PTT key-up.
-            // Sample a short window to confirm no one started transmitting
-            // in the gap between waitForClearChannel returning and now.
+            // Courtesy Delay (absorbs processing time)
+            if (lastRxEndAt > 0) {
+              const msSinceRx = Date.now() - lastRxEndAt;
+              const remainingCourtesyMs = config.tx.courtesyDelayMs - msSinceRx;
+              if (remainingCourtesyMs > 0) {
+                logger?.info?.(`[digirig] TX courtesy delay: waiting ${remainingCourtesyMs}ms`);
+                await delay(remainingCourtesyMs);
+                // The channel might have become busy during our courtesy wait
+                if (audioMonitor.isCarrierPresent()) {
+                  logger?.info?.(`[digirig] TX deferred: carrier detected after courtesy wait`);
+                  await delay(BACKOFF_MS);
+                  continue;
+                }
+              }
+            }
+
+            // Check 2: Final carrier check immediately before PTT key-up (last 50ms).
+            await delay(50);
             if (audioMonitor.isCarrierPresent()) {
-              logger?.info?.(`[digirig] TX deferred: carrier detected at final check (attempt ${attempt}/${MAX_TX_ATTEMPTS}, energy=${audioMonitor.getLastEnergy().toFixed(6)})`);
+              logger?.info?.(`[digirig] TX deferred: carrier detected at final 50ms check (attempt ${attempt}/${MAX_TX_ATTEMPTS}, energy=${audioMonitor.getLastEnergy().toFixed(6)})`);
               await delay(BACKOFF_MS);
               continue;
             }
@@ -374,6 +392,12 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             }
 
             await logTranscript("TX", trimmed);
+            lastTxAt = Date.now();
+            const cleanText = trimmed.toUpperCase().replace(/[^A-Z0-9]/g, "");
+            const cleanCall = config.tx.callsign.toUpperCase().replace(/[^A-Z0-9]/g, "");
+            if (cleanText.includes(cleanCall)) {
+              lastIdTxAt = Date.now();
+            }
             transmitted = true;
             break;
           }
@@ -401,6 +425,16 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     started = true;
     logger = ctx.log ?? null;
     runLoopAbort = new AbortController();
+
+    if (idTimer) clearInterval(idTimer);
+    idTimer = setInterval(async () => {
+      // If we have transmitted since our last ID, and 10 minutes have passed, send a standalone ID.
+      if (lastTxAt > lastIdTxAt && Date.now() - lastIdTxAt >= 10 * 60 * 1000) {
+        ctx.log?.info?.(`[digirig] 10-minute FCC ID timer triggered.`);
+        // Queue the ID transmission
+        await speak(`This is ${config.tx.callsign} standing by.`);
+      }
+    }, 60000);
 
     const updateStatus = (patch: Partial<{
       running: boolean;
@@ -545,7 +579,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             if (!shortReply) return;
             if (!isSpeakableStreamingReply(shortReply)) return;
             
-            const txText = appendCallsign(shortReply, config.tx.callsign);
+            let txText = shortReply;
+            if (Date.now() - lastIdTxAt > 9 * 60 * 1000) {
+              txText = appendCallsign(shortReply, config.tx.callsign);
+            }
             ctx.log?.info?.(`[digirig] reply deliver: ${txText}`);
             didSpeak = true;
             
@@ -714,6 +751,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       ctx.abortSignal.removeEventListener("abort", abortRunLoop);
       try { txApiServer?.close(); } catch { /* ignore */ }
       txApiServer = null;
+      if (idTimer) clearInterval(idTimer);
+      idTimer = null;
       started = false;
       audioMonitor.stop();
       runLoopAbort = null;
@@ -727,6 +766,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
   const stop = async () => {
     hardStopped = true;
+    if (idTimer) clearInterval(idTimer);
+    idTimer = null;
     runLoopAbort?.abort();
     started = false;
     audioMonitor.stop();
