@@ -196,3 +196,6 @@ Help run nets: check-in tracking, relay management, priority traffic handling, t
 3. Anti-doubling under busy conditions
 4. FCC compliance response
 5. New PTT lead time (300ms) — first syllables clear?
+
+### P4-12: Hard Abort / Barge-in (from BUG-15)
+If the AI is transmitting or running a long background task, and the operator keys up to say 'Cancel', the system should immediately abort the current context (hard abort). Low priority for now.

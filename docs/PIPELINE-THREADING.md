@@ -31,15 +31,15 @@ We break the monolith into independent workers connected by asynchronous queues.
     *   *Job:* Pulls from the `Outbound PCM Queue`.
     *   *Action:* Manages the physical radio. Applies courtesy delays, checks for channel carrier (anti-doubling), keys the PTT, plays the PCM buffer, and unkeys.
 
-### 2. Example: Asynchronous Task (Dow Futures)
+### 2. Example: Asynchronous Task (Dow Futures) & Async Audio Ack
 1. Operator asks: *"What are the Dow futures doing?"*
 2. **RX** captures audio -> pushes to Queue.
 3. **STT** transcribes -> pushes to Queue.
 4. **Agent** gets text. Decides it needs to run `web_search`.
-5. **Agent** immediately pushes text: *"Copy, pulling live Dow futures now. Stand by one. W6RGC/AI"* to the Outbound Queue.
-6. **PTT Controller** keys up and says the standby message.
-7. *[Radio goes silent, humans can use the repeater]*
-8. **Agent** finishes the web search 4 seconds later and pushes: *"Rich, Dow futures are currently up 150 points. W6RGC/AI"* to the Outbound Queue.
+5. **Middleware** detects the tool invocation and automatically pushes a special CW audio cue (`~/src/w6rgc-ai/audio/ai.wav`) to the Outbound Queue as an "Async Audio Ack".
+6. **PTT Controller** keys up and plays the short CW tone (`.- ..`).
+7. *[Radio goes silent, humans can use the repeater while the tool runs in the background]*
+8. **Agent** finishes the web search 4 seconds later and pushes the TTS answer: *"Rich, Dow futures are currently up 150 points. W6RGC/AI"* to the Outbound Queue.
 9. **PTT Controller** waits for the channel to be clear, keys up, and delivers the final answer.
 
 ## Architecture Diagram
