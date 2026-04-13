@@ -1,10 +1,14 @@
 # DigiRig Development Roadmap
-*Updated: April 4, 2026 — 11:11 AM PDT*
+*Updated: April 12, 2026 — 18:15 PM PDT*
 
-## ✅ Completed (April 4, 2026)
+## ✅ Completed (April 12, 2026)
 
+- [x] **Faster Model for Radio Sessions (P1-1)** — Switched from Opus to Gemini 3.1 Pro Preview for speed.
+- [x] **STT Callsign Fuzzy Matching (P1-2)** — Implemented via Levenshtein matching against SCCARC roster.
+- [x] **FCC ID Timer (P2-2)** — 10-minute auto-ID interval tracked in `runtime.ts`.
+- [x] **preRollMs Default (P2-4)** — Increased to 600ms in `defaults.ts`.
 - [x] **DTMF Tones** — Standalone CLI `dtmf-send.mjs` + TX API on port 18089. Verified on K6BJ.
-- [x] **Anti-Doubling** — Triple carrier-sense check with retry and backoff.
+- [x] **Anti-Doubling** — Triple carrier-sense check with retry and backoff + Courtesy Delay (2000ms).
 - [x] **PTT Lead Time** — 150ms → 300ms. Prevents clipped first syllables.
 - [x] **FCC Compliance** — Part 97 awareness in prompt. Lighthearted, positive response if asked.
 - [x] **APRS Skill** — Read/send messages + locate stations via findu.com.
@@ -19,22 +23,12 @@
 
 ## 🔥 Priority 1 — Near Term
 
-### P1-1: Faster Model for Radio Sessions
-**Impact:** High — dispatch times 30-60s with Opus  
-**Description:** Use Sonnet (or similar) for radio. Speed > depth on-air.  
-**Status:** Awaiting Rich's confirmation
-
-### P1-2: STT Callsign Fuzzy Matching
-**Impact:** High — "WB60WP" → WB6DWP, "KU6AFE" → KE6AFE  
-**Description:** Post-STT normalization using SCCARC roster (`references/sccarc-roster.csv`). Levenshtein distance or phonetic similarity matching.  
-**Status:** Roster available. Ready to implement.
-
-### P1-3: DTMF Runtime Integration
+### P1-1: DTMF Runtime Integration
 **Impact:** High — radio session struggles to call `exec` → `dtmf-send --tx`  
-**Options:** A) First-class tool, B) Auto-detect from response, C) Test with Sonnet first  
-**Status:** Needs design decision from Rich
+**Options:** A) First-class tool, B) Auto-detect from response, C) Rely strictly on the `digirig-tones` skill
+**Status:** Skill path chosen and enforced in `prompt.ts`. Monitoring reliability.
 
-### P1-4: Pipeline Threading
+### P1-2: Pipeline Threading
 **Impact:** High — dropped transcriptions when messages arrive during STT processing  
 **Description:** Current pipeline is sequential: RX → STT → LLM → TTS → TX. If a new transmission arrives while STT is processing the previous one, it gets dropped. Need concurrent capture with queued processing.  
 **Architecture:**
@@ -50,7 +44,7 @@ RX Audio → [Capture Queue] → STT Worker(s) → [Text Queue] → LLM → [Out
 - LLM processes text segments from queue
 - Output router dispatches to appropriate renderer
 - This architecture also enables the multi-mode output (voice, DTMF, APRS, CW) from a single pipeline  
-**Status:** Design needed. This is foundational — many features below depend on it.
+**Status:** Design needed. This is foundational.
 
 ---
 
@@ -59,14 +53,12 @@ RX Audio → [Capture Queue] → STT Worker(s) → [Text Queue] → LLM → [Out
 ### P2-1: Whisper Hallucination Filter (BUG-8)
 Repetition detector + expanded static filter list. Ready to implement.
 
-### P2-2: FCC ID Timer (BUG-9)
-10-minute auto-ID. Regulatory compliance. Ready to implement.
-
-### P2-3: Energy Log Spam (BUG-13)
+### P2-2: Energy Log Spam (BUG-13)
 Gate frame-level logging behind verbose flag. Ready to implement.
 
-### P2-4: preRollMs Default (BUG-11)
-Change 100ms → 600ms in defaults.ts. One-liner.
+### P2-3: Over-Response Bug (BUG-14)
+The system sometimes responds too often and interrupts third-party conversations. We need to improve the conversational continuity logic so it only transmits when directly addressed or contextually required.
+**Status:** Documented in AGENT.md. Waiting for logic refinement.
 
 ---
 
@@ -193,7 +185,8 @@ Help run nets: check-in tracking, relay management, priority traffic handling, t
 
 **Decisions needed:**
 1. ~~SCCARC club roster~~ ✅ Provided and saved
-2. **Confirm Sonnet for radio** — OK to use faster model on-air? (P1-1)
+2. ~~Confirm Sonnet for radio~~ ✅ Switched to Gemini 3.1 Pro Preview
+
 3. **DTMF integration preference** — A, B, or C? (P1-3)
 4. **IC-705 timeline** — When will CAT control hardware be ready? (P3-1)
 
