@@ -79,6 +79,23 @@ import {
   })
   .default({});
 
+  const DigirigLlmSchema = z.object({
+    model: z.string().optional(),
+    offlineFallbackModel: z.string().optional(),
+  }).default({});
+
+  const DigirigTonesSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    timeoutMs: z.number().int().min(500).default(2000),
+    assets: z.object({
+      standby: z.string().default("./audio/standby_short.wav"),
+      error: z.string().default("./audio/error.wav"),
+      beep: z.string().default("./audio/ai.wav"),
+    }).default({}),
+  })
+  .default({});
+
 export const DigirigConfigSchema = z.object({
   enabled: z.boolean().optional().default(true),
   audio: z.preprocess((val) => val ?? {}, DigirigAudioSchema),
@@ -86,6 +103,8 @@ export const DigirigConfigSchema = z.object({
   rx: z.preprocess((val) => val ?? {}, DigirigRxSchema),
   stt: z.preprocess((val) => val ?? {}, DigirigSttSchema),
   tx: z.preprocess((val) => val ?? {}, DigirigTxSchema),
+  llm: z.preprocess((val) => val ?? {}, DigirigLlmSchema),
+  tones: z.preprocess((val) => val ?? {}, DigirigTonesSchema),
 });
 
 export type DigirigConfig = z.infer<typeof DigirigConfigSchema>;

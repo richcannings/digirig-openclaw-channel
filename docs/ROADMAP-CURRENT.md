@@ -30,6 +30,16 @@
 **Options:** A) First-class tool, B) Auto-detect from response, C) Rely strictly on the `digirig-tones` skill
 **Status:** Skill path chosen and enforced in `prompt.ts`. Monitoring reliability.
 
+### P1-2: Latency Acknowledgments & Unified TX Queue
+**Impact:** High UX improvement  
+**Description:** Implement a unified priority TX queue (Voice, DTMF, Pre-recorded WAVs) and a timeout-based acknowledgment system. If the AI needs more than ~2000ms to fetch data or run a tool, it plays a fast "Stand by" tone or voice clip to prevent operators from retrying their transmission. Keeps channel clear by unkeying while thinking.  
+**Status:** PRD written (`PRD_latency_ack.md`). Ready to implement.
+
+### P1-3: Configurable Radio LLM & Offline Fallback
+**Impact:** High — UX speed and emergency survivability  
+**Description:** Add configuration to allow the radio channel to specify a distinct LLM (e.g., Gemini Flash for speed) instead of inheriting the global OpenClaw default. Implement an automatic fallback mechanism so that if the internet connection is lost, the channel automatically fails over to a local Ollama model (e.g., `ollama/llama3`), allowing continuous off-grid operation.  
+**Status:** PRD written (`PRD_radio_llm_fallback.md`).
+
 ---
 
 ## 🟡 Priority 2 — This Sprint
@@ -48,30 +58,30 @@ The system sometimes responds too often and interrupts third-party conversations
 
 ## 🔵 Priority 3 — Medium Term Features
 
-### P3-1: CAT Control (ICOM IC-705)
-**Impact:** Transformative — full radio control  
-**Description:** Rich is plugging into an ICOM IC-705 with CAT (Computer Aided Transceiver) control. This enables the AI to change frequency, mode (FM/SSB/CW/digital), power, filters, and read radio status — not just voice+PTT.  
+### P3-1: CAT Control (ICOM IC-705 & General)
+**Impact:** Transformative — full radio control & multi-VFO awareness  
+**Description:** Integrating CAT (Computer Aided Transceiver) control. This enables the AI to change frequency, mode (FM/SSB/CW/digital), power, filters, and read radio status — not just voice+PTT.  
 **Capabilities unlocked:**
 - Change bands/frequencies on command ("go to 7.074 MHz for FT8")
 - Switch modes (FM ↔ SSB ↔ CW ↔ digital)
 - Read S-meter, SWR, frequency, mode status
 - Band scanning and signal hunting
 - Automated band/mode switching for multi-mode operation
-- QSY (change frequency) during QSO when requested  
+- QSY (change frequency) during QSO when requested
+- **Dual VFO monitoring:** Listen to both APRS/digital and phone/voice frequencies simultaneously, creating a true digital bridge.  
 **Integration:** CI-V protocol over serial/USB. Existing Node.js libraries available.  
 **Depends on:** Pipeline threading (P1-4) for multi-mode operation  
 **Status:** Waiting for hardware hookup
 
-### P3-2: Offline APRS via Direwolf
+### P3-2: True Digital Bridge via Direwolf (AX.25/APRS)
 **Impact:** High — digital packet radio without internet  
-**Description:** Integrate with Direwolf software modem to send/receive APRS packets directly on 144.390 MHz. Currently APRS goes through findu.com (internet). This enables true RF APRS.  
+**Description:** Integrate with Direwolf software modem to send/receive APRS/Winlink packets directly via RF. The AI will serve as a bridge, allowing other agents/tools to communicate over packet radio while it handles humans via voice.  
 **Capabilities:**
-- Send APRS position reports, messages, and telemetry over RF
-- Receive and decode APRS packets from nearby stations
-- Digipeater awareness and path selection
-- Position beaconing for W6RGC/AI  
-**Depends on:** CAT control (P3-1) to switch to 144.390, or dedicated second radio  
-**Status:** Design needed
+- AI sends/receives APRS/Winlink natively without findu.com.
+- TX Queue dispatches binary packet payloads to Direwolf.
+- Combine with CAT control: "Send APRS message to X" -> AI QSYs to 144.390, sends packet, returns to voice.
+**Depends on:** Unified TX Queue (P1-2), CAT control (P3-1) or dedicated second radio.  
+**Status:** Design stage.
 
 ### P3-3: CW Send and Receive
 **Impact:** Medium-high — opens HF CW bands  
@@ -92,9 +102,9 @@ The system sometimes responds too often and interrupts third-party conversations
 **Depends on:** CAT control (P3-1) to know when we're in SSB mode  
 **Status:** Research needed
 
-### P3-5: Offline/Local Mode (Project Nomad Philosophy)
+### P3-4: Offline/Local Mode (Project Nomad Philosophy)
 **Impact:** High for emergency/field deployments  
-**Description:** Run entirely offline with local LLM, local knowledge base, and local tools. Inspired by Project Nomad (projectnomad.us) which bundles offline Wikipedia, local LLMs (Ollama), offline maps, and education tools.  
+**Description:** Building on the Ollama offline fallback (P1-3), run entirely offline with a local knowledge base and local tools. Inspired by Project Nomad (projectnomad.us) which bundles offline Wikipedia, local LLMs (Ollama), offline maps, and education tools.  
 **Approach:** May not need to integrate Nomad directly. OpenClaw + local LLM (Ollama/llama.cpp) + Kiwix for offline Wikipedia + offline maps could achieve the same thing.  
 **Components:**
 - Local LLM backend (Ollama with appropriate model)
@@ -183,3 +193,9 @@ Help run nets: check-in tracking, relay management, priority traffic handling, t
 
 ### P4-12: Hard Abort / Barge-in (from BUG-15)
 If the AI is transmitting or running a long background task, and the operator keys up to say 'Cancel', the system should immediately abort the current context (hard abort). Low priority for now.
+
+### P4-13: Chunked Audio Streaming for TTS (Plan B)
+**Impact:** High UX improvement (zero-latency voice start)  
+**Description:** Rewrite the TTS and audio playback pipeline to stream audio chunk-by-chunk rather than waiting for the complete sentence buffer. This will provide the absolute lowest latency from LLM thought to RF transmission.  
+**Implementation:** Requires migrating away from spawning `aplay` (to prevent popping/process overhead) towards a native ALSA Node.js binding, and modifying OpenClaw's core TTS API to support chunked streaming. Replaces the block-based buffer queue.  
+**Status:** Documented as a future architectural upgrade.

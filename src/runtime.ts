@@ -12,6 +12,7 @@ import { PttController } from "./ptt.js";
 import { playPcm, synthesizeTts } from "./tts.js";
 import { HAM_RADIO_PROMPT } from "./prompt.js";
 import { AsyncQueue } from "./pipeline/queue.js";
+import { AudioAssets } from "./pipeline/audio-assets.js";
 
 export function appendCallsign(text: string, callsign?: string): string {
   const trimmed = text.trim();
@@ -90,12 +91,15 @@ type TxJob =
       text: string;
       hooks?: { onPttKeyed?: (atMs: number) => void; onAudioStart?: (atMs: number) => void };
       done?: { resolve: () => void; reject: (err: unknown) => void };
+      abortSignal?: AbortSignal;
     }
   | {
       kind: "raw";
       pcm: Buffer;
       sampleRate: number;
+      label?: string;
       done?: { resolve: () => void; reject: (err: unknown) => void };
+      abortSignal?: AbortSignal;
     };
 
 function formatRadioReply(text: string, maxWords = 300): string {
@@ -327,12 +331,21 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   const executeTextTx = async (
     text: string,
     hooks?: { onPttKeyed?: (atMs: number) => void; onAudioStart?: (atMs: number) => void },
+    abortSignal?: AbortSignal,
   ) => {
     const tts = await synthesizeTts(runtime, text);
     const bytesPerMs = tts.sampleRate * 2 / 1000;
     const audioMs = bytesPerMs > 0 ? Math.ceil(tts.audioBuffer.length / bytesPerMs) : 0;
     const muteMs = Math.max(0, config.ptt.leadMs + config.ptt.tailMs + audioMs + 500);
     const txAbortController = new AbortController();
+    
+    // Wire up parent abort signal to the inner one
+    const parentAbortHandler = () => txAbortController.abort();
+    if (abortSignal) {
+      abortSignal.addEventListener("abort", parentAbortHandler);
+      if (abortSignal.aborted) txAbortController.abort();
+    }
+
     const maxTxTimer = setTimeout(() => {
       logger?.error?.(`[digirig] CRITICAL: Max TX duration (${config.tx.maxTxMs}ms) exceeded. Forcefully aborting transmission to protect hardware.`);
       txAbortController.abort();
@@ -404,10 +417,13 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       }
     } finally {
       clearTimeout(maxTxTimer);
+      if (abortSignal) {
+        abortSignal.removeEventListener("abort", parentAbortHandler);
+      }
     }
   };
 
-  const executeRawTx = async (pcm: Buffer, sampleRate: number) => {
+  const executeRawTx = async (pcm: Buffer, sampleRate: number, label?: string, abortSignal?: AbortSignal) => {
     const bytesPerMs = sampleRate * 2 / 1000;
     const audioMs = bytesPerMs > 0 ? Math.ceil(pcm.length / bytesPerMs) : 0;
     const muteMs = Math.max(0, config.ptt.leadMs + config.ptt.tailMs + audioMs + 500);
@@ -431,14 +447,17 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
     audioMonitor.muteFor(muteMs);
     try {
-      await playPcm({ device: config.audio.outputDevice, sampleRate, channels: 1, pcm });
+      await playPcm({ device: config.audio.outputDevice, sampleRate, channels: 1, pcm, signal: abortSignal });
     } finally {
       if (config.ptt.tailMs > 0) await delay(config.ptt.tailMs);
       await ptt.setTx(false);
       audioMonitor.muteFor(1500);
     }
 
-    await logEvent({ type: "TX_RAW", audioMs, sampleRate });
+    await logEvent({ type: "TX_RAW", audioMs, sampleRate, label, summary: label ? `TX_RAW: ${label} tone (${audioMs}ms)` : undefined });
+    if (label) {
+      logger?.info?.(`[digirig] Transmitted raw audio tone: ${label} (${audioMs}ms)`);
+    }
   };
 
   const start = async (ctx: ChannelGatewayStartContext<DigirigConfig>) => {
@@ -446,6 +465,14 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     started = true;
     logger = ctx.log ?? null;
     runLoopAbort = new AbortController();
+
+    if (config.tones?.enabled) {
+      const sr = config.audio.sampleRate;
+      const { standby, error, beep } = config.tones.assets || {};
+      if (standby) await AudioAssets.eagerLoad("standby", standby, sr);
+      if (error) await AudioAssets.eagerLoad("error", error, sr);
+      if (beep) await AudioAssets.eagerLoad("beep", beep, sr);
+    }
 
     const updateStatus = (patch: Partial<{
       running: boolean;
@@ -561,6 +588,28 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           let detectedSender: string | null = null;
 
           ctx.log?.info?.(`[digirig] dispatch reply start session=${job.sessionId}`);
+          
+          let tonesTimer: NodeJS.Timeout | null = null;
+          if (config.tones?.enabled) {
+            tonesTimer = setTimeout(() => {
+              tonesTimer = null;
+              if (didSpeak) return; // Voice beat the timer
+              
+              // Timer popped, inject acknowledgment beep
+              const standbyPcm = AudioAssets.get("standby") || AudioAssets.get("beep");
+              if (standbyPcm) {
+                ctx.log?.info?.(`[digirig] Latency timeout hit, injecting standby tone...`);
+                // Use unshift to jump the queue!
+                txQueue.unshift({
+                  kind: "raw",
+                  pcm: standbyPcm,
+                  sampleRate: config.audio.sampleRate,
+                  label: "standby"
+                });
+              }
+            }, config.tones.timeoutMs);
+          }
+
           const dispatchResult = await dispatchRadioReply({
             runtime,
             cfg,
@@ -589,6 +638,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
               if (Date.now() - lastIdTxAt > 9 * 60 * 1000) txText = appendCallsign(shortReply, config.tx.callsign);
               ctx.log?.info?.(`[digirig] reply deliver: ${txText}`);
               didSpeak = true;
+              if (tonesTimer) {
+                clearTimeout(tonesTimer);
+                tonesTimer = null;
+              }
 
               const speakStartAt = Date.now();
               await speak(txText, { onPttKeyed: (atMs) => { if (!firstPttAt) firstPttAt = atMs; } });
@@ -596,6 +649,22 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             },
           });
           const dispatchEndAt = Date.now();
+          if (tonesTimer) clearTimeout(tonesTimer);
+          
+          // Check for LLM dispatch failures to play error tone
+          if (config.tones?.enabled && (!dispatchResult || dispatchResult.finalText === undefined)) {
+            const errorPcm = AudioAssets.get("error");
+            if (errorPcm) {
+              ctx.log?.info?.(`[digirig] Dispatch failed, playing error tone...`);
+              txQueue.unshift({
+                kind: "raw",
+                pcm: errorPcm,
+                sampleRate: config.audio.sampleRate,
+                label: "error"
+              });
+            }
+          }
+
           const counts = dispatchResult?.counts ?? {};
 
           ctx.log?.info?.(`[digirig] dispatch result counts=${JSON.stringify(counts)} finalLen=${dispatchResult?.finalText?.length ?? 0}`);
@@ -632,7 +701,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             logger?.info?.(`[digirig] Audio input: ${job.text}`);
             await executeTextTx(job.text, job.hooks);
           } else {
-            await executeRawTx(job.pcm, job.sampleRate);
+            await executeRawTx(job.pcm, job.sampleRate, job.label);
           }
           job.done?.resolve();
         } catch (err) {

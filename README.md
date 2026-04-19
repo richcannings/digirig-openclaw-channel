@@ -14,6 +14,8 @@ Try it on your repeater!
 
 🎙️ **Voice QSOs** — Natural conversations on any voice repeater or simplex frequency. Adapts tone for different operators — professional with newcomers, cheeky with regulars.
 
+⏱️ **Latency Acknowledgments** — Respects RF etiquette during complex tasks. If a database search or tool execution takes time, it automatically queues a quick "Stand by" tone or voice prompt, keeping the channel clear and the operator informed.
+
 📡 **DTMF Control** — Sends repeater control codes on command. "Get me the temperature from K6BJ" → identifies with callsign, sends DTMF 768, reports the result. Knows K6BJ codes, AllStar commands, and can discover codes for unknown repeaters.
 
 🗺️ **APRS** — Reads messages, sends messages, and locates stations via findu.com. "Where is KN6TYR-1?" → "0.4 miles southwest of Santa Cruz, heading north-northeast at 6.9 MPH."

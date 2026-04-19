@@ -63,11 +63,30 @@ export async function dispatchRadioReply(params: {
   log: any;
 }) {
   const { runtime, cfg, route, ctxPayload, deliver, log } = params;
+
+  // Clone config to apply LLM override for radio
+  const radioCfg = JSON.parse(JSON.stringify(cfg));
+  const digirigCfg = radioCfg.channels?.digirig ?? {};
+  const modelOverride = digirigCfg.llm?.model;
+  const offlineFallback = digirigCfg.llm?.offlineFallbackModel;
+
+  if (modelOverride && radioCfg.agents?.list) {
+    const agent = radioCfg.agents.list.find((a: any) => a.id === route.agentId);
+    if (agent) {
+      if (!agent.model) agent.model = {};
+      agent.model.primary = modelOverride;
+      if (offlineFallback) {
+        agent.model.fallbacks = [offlineFallback, ...(agent.model.fallbacks || [])];
+      }
+      log?.info?.(`[digirig] Overriding route agent model to: ${modelOverride} (fallback: ${offlineFallback || "none"})`);
+    }
+  }
+
   let prefixOptions: any = {};
   let onModelSelected: any = undefined;
   if (typeof createReplyPrefixOptions === "function") {
     const opts = createReplyPrefixOptions({
-      cfg,
+      cfg: radioCfg,
       agentId: route.agentId,
       channel: "digirig",
       accountId: route.accountId,
@@ -79,7 +98,7 @@ export async function dispatchRadioReply(params: {
 
   return runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
     ctx: ctxPayload,
-    cfg,
+    cfg: radioCfg,
     dispatcherOptions: {
       ...prefixOptions,
       deliver,
@@ -87,7 +106,10 @@ export async function dispatchRadioReply(params: {
         log?.error?.(`[digirig] ${info.kind} reply failed: ${String(err)}`),
     },
     replyOptions: {
-      onModelSelected,
+      onModelSelected: (selected: any) => {
+        log?.info?.(`[digirig] Model selected for reply: ${selected.provider}/${selected.model}`);
+        if (onModelSelected) onModelSelected(selected);
+      },
       onAgentRunStart: (runId: string) => log?.info?.(`[digirig] agent run start: ${runId}`),
       disableBlockStreaming: false,
     },
