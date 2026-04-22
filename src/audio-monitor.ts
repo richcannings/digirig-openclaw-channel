@@ -86,7 +86,6 @@ export class AudioMonitor extends EventEmitter {
     });
 
     this.proc.stdout?.on("data", (chunk: Buffer) => {
-      this.lastFrameAt = Date.now();
       this.handleChunk(chunk);
     });
     this.proc.stderr?.on("data", (chunk: Buffer) => {
@@ -134,6 +133,11 @@ export class AudioMonitor extends EventEmitter {
   }
 
   private handleChunk(chunk: Buffer): void {
+    // Track when the last audio chunk arrived — isCarrierPresent() and the
+    // stall detector both rely on this. Must be updated even if the chunk is
+    // too short for a single frame, so we do it up-front.
+    this.lastFrameAt = Date.now();
+
     const frameBytes = Math.floor(
       (this.config.sampleRate * this.config.channels * 2 * this.config.frameMs) / 1000,
     );
