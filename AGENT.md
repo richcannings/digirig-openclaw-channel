@@ -21,7 +21,15 @@ An OpenClaw channel plugin that connects amateur radio to an AI assistant via Di
 - External scripts CANNOT key PTT while channel is running (port lock).
 - TX API on port 18089 accepts raw PCM and handles PTT internally.
 - 300ms lead delay before audio for radio/repeater settling.
-- Triple carrier-sense: holdoff wait → final energy check → listen during lead delay.
+- Anti-doubling: busy-hold wait + courtesy delay (default 2s) + final carrier check 50ms before keying. Up to 3 retries with 1200ms backoff.
+- `/digirig unkey` is an operator-safety command that drops PTT immediately, aborts the in-flight TX, and drains the queue.
+
+### Text-to-Speech
+Two paths, picked by `channels.digirig.localTts.engine`:
+- `"piper"` or `"kokoro"`: local HTTP daemon (installed by `scripts/setup-{piper,kokoro}-daemon.sh`). No network, no API keys, no per-call cost.
+- `"off"` (default): cloud TTS via OpenClaw's `runtime.tts.textToSpeechTelephony` — depends on whichever speech provider is configured under `messages.tts.providers.*`.
+
+Daemons expose a shared HTTP contract (`POST /tts` with `{text}`, returns raw 16-bit PCM + `X-Sample-Rate` header) — new backends can be added by dropping a new daemon with the same shape and wiring the enum in `config.ts`.
 
 ### Callsign Processing
 - Post-STT fuzzy matching corrects garbled callsigns using SCCARC roster (141 entries) + dynamically heard callsigns
@@ -35,38 +43,74 @@ An OpenClaw channel plugin that connects amateur radio to an AI assistant via Di
 - `--tx` flag POSTs to TX API (port 18089) which handles PTT
 - 911 emergency sequences blocked by default (`--allow-emergency` required)
 
-### Prompt Structure (src/prompt.ts)
-15 sections covering: brevity, continuity, multi-operator, STT correction, signal reports, net check-ins, inspiring hams, ARES, sender ID, channel management, FCC legitimacy, security, DTMF, special callsigns.
+### Prompt Structure (src/prompt/)
+The system prompt is assembled in `src/prompt/index.ts` from concern-specific files:
+
+- `persona.ts` — who the AI is and how it talks (sections 1–6)
+- `perception.ts` — STT hallucinations + signal-report interpretation
+- `contracts.ts` — output tags the plugin parses, e.g. `[SENDER:CALLSIGN]`
+- `protocols.ts` — net check-ins, ARES, doubling, FCC
+- `safety.ts` — absolute security rules
+- `capabilities.ts` — `CapabilityBlock[]` registry: DTMF, APRS (each entry points at its
+  `skills/<id>/SKILL.md`)
+- `operators.ts` — per-operator quirks (WB6DWP cheeky, etc.)
+
+`formatSignalReport()` in the same file builds the per-message `[System Data]`
+block referenced by `perception.ts` section 8. The voice↔LLM pipeline in
+`runtime.ts` only imports `HAM_RADIO_PROMPT` and `formatSignalReport`.
+
+### Latency Acknowledgment (runtime.ts + src/pipeline/audio-assets.ts)
+If the LLM dispatcher doesn't deliver text within `tones.timeoutMs` (default 2000 ms)
+after an RX ends, a pre-loaded "Stand by" WAV is `unshift`'d to the front of the TX
+queue. On hard dispatch failure, `error.wav` is injected instead. WAVs are eager-loaded
+on channel start so there's no disk I/O in the hot path.
 
 ## File Layout
 
 ```
+index.ts               — Channel registration, /digirig commands, digirig_tx tool
 src/
-  runtime.ts        — Main loop, TX API, callsign matching, speak()
-  audio-monitor.ts  — RX capture, VAD, energy, carrier sense
-  prompt.ts         — Ham radio operator persona
-  ptt.ts            — Serial PTT control
-  tts.ts            — TTS synthesis + aplay
-  config.ts         — Zod config schema
-  defaults.ts       — Default config values
-  channel-core.ts   — OpenClaw channel integration
-  state.ts          — Plugin runtime state
+  runtime.ts           — Four async workers (RX → STT → agent → TX), TX API on :18089
+  audio-monitor.ts     — RX capture, VAD, energy, carrier sense
+  prompt/              — Ham radio persona split by concern (see "Prompt Structure" above)
+  ptt.ts               — Serial PTT control
+  tts.ts               — TTS synthesis + aplay
+  config.ts            — Zod config schema
+  defaults.ts          — Default config values
+  channel-core.ts      — OpenClaw dispatch + per-channel LLM override
+  state.ts             — Plugin runtime singleton
+  pipeline/
+    queue.ts           — Async FIFO with priority unshift
+    audio-assets.ts    — Eager-loaded tone WAV cache
 
 scripts/
-  dtmf-send.mjs     — DTMF tone CLI
-  digirig-tail.cjs  — Pretty log viewer
+  dtmf-send.mjs            — DTMF tone CLI (POSTs raw PCM to :18089/tx/raw)
+  aprs.mjs                 — findu.com APRS helper
+  stt_daemon.py            — Hot-loaded Whisper HTTP daemon on :18088
+  piper-daemon.py          — Piper TTS HTTP daemon on :18090
+  kokoro-daemon.py         — Kokoro-82M TTS HTTP daemon on :18091
+  setup-stt-daemon.sh      — Installs whisper-daemon.service
+  setup-piper-daemon.sh    — Installs piper-daemon.service + binary + voice
+  setup-kokoro-daemon.sh   — Installs kokoro-daemon.service + model + voices
+  digirig-tail.cjs         — Pretty log viewer (auto-rotates)
+  generate-assets.sh       — Regenerate standby/error tone WAVs
 
 skills/
-  digirig-tones/    — DTMF skill + K6BJ/AllStar codes
+  digirig-tones/       — DTMF skill + K6BJ/AllStar codes
+  digirig-aprs/        — APRS via findu.com
 
 docs/
-  ROADMAP-CURRENT.md — Active roadmap
-  DESIGN.md          — Architecture
-  DTMF-DESIGN.md     — DTMF CLI design
+  ROADMAP.md           — Feature roadmap
+  claude-redesign.md   — Current plan of record (latency + simplicity)
+  DESIGN.md            — Architecture
+  PIPELINE-THREADING.md — Async-queue diagram + explanation
+  PRD_latency_ack.md   — Shipped
+  PRD_radio_llm_fallback.md — Shipped
+  DESIGN_audio_assets.md — Latency-ack WAV loading
 
 archive/
-  dtmf-experiment/   — Old TTS-based DTMF (failed approach)
-  stale-docs/        — Superseded documentation
+  dtmf-experiment/     — Old TTS-based DTMF (failed approach, kept as a "don't repeat" marker)
+  stale-docs/          — Superseded documents (incl. tts-streaming-design.md, referenced from docs/)
 ```
 
 ## Don't Do These Things

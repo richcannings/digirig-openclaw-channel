@@ -7,80 +7,55 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "enabled": {
-        "type": "boolean"
-      },
+      "enabled": { "type": "boolean" },
       "audio": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "inputDevice": {
-            "type": "string"
-          },
-          "outputDevice": {
-            "type": "string"
-          },
-          "sampleRate": {
-            "type": "integer",
-            "minimum": 1
-          }
+          "inputDevice": { "type": "string" },
+          "outputDevice": { "type": "string" },
+          "sampleRate": { "type": "integer", "minimum": 1 }
         }
       },
       "ptt": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "device": {
-            "type": "string"
-          },
-          "rts": {
-            "type": "boolean"
-          },
-          "leadMs": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "tailMs": {
-            "type": "integer",
-            "minimum": 0
-          }
+          "device": { "type": "string" },
+          "rts": { "type": "boolean" },
+          "leadMs": { "type": "integer", "minimum": 0 },
+          "tailMs": { "type": "integer", "minimum": 0 }
         }
       },
       "rx": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "energyThreshold": {
-            "type": "number",
-            "minimum": 0
-          },
-          "energyLogIntervalMs": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "frameMs": {
-            "type": "integer",
-            "minimum": 5
-          },
-          "preRollMs": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "minSpeechMs": {
-            "type": "integer",
-            "minimum": 50
-          },
-          "maxSilenceMs": {
-            "type": "integer",
-            "minimum": 100
-          },
-          "maxRecordMs": {
-            "type": "integer",
-            "minimum": 1000
-          },
-          "busyHoldMs": {
-            "type": "integer",
-            "minimum": 50
+          "energyThreshold": { "type": "number", "minimum": 0 },
+          "energyLogIntervalMs": { "type": "integer", "minimum": 0 },
+          "carrierSenseThreshold": { "type": "number", "minimum": 0 },
+          "frameMs": { "type": "integer", "minimum": 5 },
+          "preRollMs": { "type": "integer", "minimum": 0 },
+          "minSpeechMs": { "type": "integer", "minimum": 50 },
+          "maxSilenceMs": { "type": "integer", "minimum": 100 },
+          "maxRecordMs": { "type": "integer", "minimum": 1000 },
+          "busyHoldMs": { "type": "integer", "minimum": 50 },
+          "startCooldownMs": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "stt": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "STT uses a local Whisper HTTP daemon on 127.0.0.1:18088; these knobs control the CLI fallback.",
+        "properties": {
+          "language": { "type": "string" },
+          "cliFallback": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "command": { "type": "string" },
+              "model": { "type": "string" }
+            }
           }
         }
       },
@@ -88,40 +63,81 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "callsign": {
-            "type": "string"
-          },
-          "policy": {
-            "type": "string"
-          },
-          "aliases": {
-            "type": "string"
+          "callsign": { "type": "string" },
+          "policy": { "type": "string", "enum": ["direct-only", "proactive"] },
+          "aliases": { "type": "string" },
+          "maxTxMs": { "type": "integer", "minimum": 1000 },
+          "courtesyDelayMs": { "type": "integer", "minimum": 0 },
+          "allowToolTx": { "type": "boolean" }
+        }
+      },
+      "llm": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Optional per-channel LLM override and offline fallback model.",
+        "properties": {
+          "model": { "type": "string" },
+          "offlineFallbackModel": { "type": "string" }
+        }
+      },
+      "localTts": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Optional local TTS daemon. 'off' = use cloud TTS. 'piper' and 'kokoro' route through an HTTP daemon installed by scripts/setup-{piper,kokoro}-daemon.sh.",
+        "properties": {
+          "engine": { "type": "string", "enum": ["off", "piper", "kokoro"] },
+          "url": { "type": "string" },
+          "voice": { "type": "string" },
+          "speed": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      },
+      "tones": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Latency acknowledgment tone settings (injected into the TX queue on dispatch timeout or error).",
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "timeoutMs": { "type": "integer", "minimum": 500 },
+          "assets": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "standby": { "type": "string" },
+              "error": { "type": "string" },
+              "beep": { "type": "string" }
+            }
           }
         }
       },
-      "stt": {
+      "persona": {
         "type": "object",
         "additionalProperties": false,
+        "description": "Per-instance identity. These values are interpolated into the system prompt — the plugin ships with generic defaults so it doesn't impersonate a specific station.",
         "properties": {
-          "wsUrl": {
+          "name": {
             "type": "string",
-            "description": "WhisperLive WebSocket endpoint (default ws://127.0.0.1:28080)."
+            "description": "What the AI calls itself when asked its name (e.g. 'Seven')."
           },
-          "whisperLiveAutoStart": {
-            "type": "boolean",
-            "description": "When true, DigiRig attempts to start the local WhisperLive systemd user service if wsUrl is not reachable."
-          },
-          "whisperLiveService": {
+          "location": {
             "type": "string",
-            "description": "systemd user service name used for auto-start (default whisperlive.service)."
+            "description": "Optional location spoken in net check-ins (e.g. 'Westside Santa Cruz')."
           },
-          "server": {
-            "type": "object",
-            "description": "Optional legacy STT server process bootstrap (compat mode)."
+          "controlOperatorCallsign": {
+            "type": "string",
+            "description": "FCC control operator callsign. Empty = derive from tx.callsign by stripping any trailing /AI."
           },
-          "localWhisper": {
-            "type": "object",
-            "description": "Optional local whisper CLI fallback settings."
+          "knownOperators": {
+            "type": "array",
+            "description": "Regulars with persona quirks. The AI adapts its tone per entry.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "callsign": { "type": "string" },
+                "note": { "type": "string" }
+              },
+              "required": ["callsign", "note"]
+            }
           }
         }
       }

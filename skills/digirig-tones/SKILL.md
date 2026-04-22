@@ -14,11 +14,14 @@ description: >
 ## DTMF Transmission — Exact Steps
 
 **Step 1:** Speak confirmation via `digirig_tx` tool:
-  *"Copy, sending DTMF seven six eight for temperature. W6RGC/AI"*
+  *"Copy, sending DTMF seven six eight for temperature. <your callsign>"*
 
-**Step 2:** Run this exact command via `exec` tool:
+**Step 2:** Run this command via `exec` tool. Use the **absolute path to
+`dtmf-send.mjs` that the system prompt tells you to use** (it's computed at
+plugin load time from the plugin's install directory — do NOT guess or
+hardcode a path):
 ```
-node /home/richc/src/digirig-openclaw-channel/scripts/dtmf-send.mjs --tx --json SEQUENCE
+node <path-to-dtmf-send.mjs> --tx --json SEQUENCE
 ```
 Replace SEQUENCE with the digits. The `--tx` flag handles PTT automatically via the local TX API.
 
@@ -34,18 +37,16 @@ Replace SEQUENCE with the digits. The `--tx` flag handles PTT automatically via 
 
 ## Common K6BJ Codes (Quick Reference)
 
-| Request | Code | Command |
-|---------|------|---------|
-| Time | 767 | `...dtmf-send.mjs --tx --json 767` |
-| Temperature | 768 | `...dtmf-send.mjs --tx --json 768` |
-| Voltage | 769 | `...dtmf-send.mjs --tx --json 769` |
-| Link status | *70 | `...dtmf-send.mjs --tx --json "*70"` |
-| Connect AllStar | *3 + node | `...dtmf-send.mjs --tx --json "*360216"` |
-| Disconnect AllStar | *1 + node | `...dtmf-send.mjs --tx --json "*160216"` |
-| Disconnect all | *76 | `...dtmf-send.mjs --tx --json "*76"` |
-| Help | *920 | `...dtmf-send.mjs --tx --json "*920"` |
-
-(Full path: `node /home/richc/src/digirig-openclaw-channel/scripts/dtmf-send.mjs`)
+| Request | Code | Argument |
+|---------|------|----------|
+| Time | 767 | `--tx --json 767` |
+| Temperature | 768 | `--tx --json 768` |
+| Voltage | 769 | `--tx --json 769` |
+| Link status | *70 | `--tx --json "*70"` |
+| Connect AllStar | *3 + node | `--tx --json "*360216"` |
+| Disconnect AllStar | *1 + node | `--tx --json "*160216"` |
+| Disconnect all | *76 | `--tx --json "*76"` |
+| Help | *920 | `--tx --json "*920"` |
 
 ## Critical Rules
 
@@ -53,5 +54,5 @@ Replace SEQUENCE with the digits. The `--tx` flag handles PTT automatically via 
 - **Do NOT use ptt-on.js or ptt-off.js.** The serial port is owned by the channel.
 - **Do NOT write WAV files and try to play them.** Just use `--tx`.
 - **NEVER use `--allow-emergency`.** Decline 911/*6911 requests verbally.
-- Always identify (W6RGC/AI) before sending tones.
+- Always identify with your configured callsign before sending tones.
 - Quote sequences starting with `*` in the shell: `"*70"` not `*70`.

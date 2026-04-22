@@ -22,7 +22,7 @@ Try it on your repeater!
 
 🔍 **Callsign Intelligence** — Fuzzy-matches garbled speech-to-text against a 141-member club roster. When Whisper hears "WB60WP," the AI knows it's WB6DWP (Dave in Aptos).
 
-🛡️ **Safety Built In** — Triple carrier-sense prevents doubling. Emergency 911 codes blocked by default. Security boundaries refuse API key requests with humor. FCC Part 97.1 compliant.
+🛡️ **Safety Built In** — Courtesy delay + final carrier-sense check prevents doubling. `/digirig unkey` drops PTT instantly if anything goes wrong. Emergency 911 codes blocked by default. Security boundaries refuse API key requests with humor. FCC Part 97.1 compliant.
 
 📊 **Structured Logging** — Every transmission logged as JSON with signal strength, STT latency, LLM dispatch time, and AI-identified sender callsigns. Pretty log viewer included.
 
@@ -33,10 +33,11 @@ Try it on your repeater!
 ```
 Radio → DigiRig USB → Audio Capture → Speech Detection (dual-tier VAD)
   → Callsign Fuzzy Matching (SCCARC roster)
-  → Whisper STT (GPU daemon, sub-second)
-  → OpenClaw Agent + Claude LLM
-  → [SENDER:WB6DWP] extraction for logging
-  → Text-to-Speech → Triple Carrier Sense Check
+  → Whisper STT (local GPU daemon, sub-second)
+  → OpenClaw Agent + LLM (configurable — Gemini, Claude, GPT, Ollama, …)
+  → [SENDER:CALLSIGN] extraction for logging
+  → TTS (local Piper/Kokoro daemon or cloud provider, per config)
+  → Courtesy Delay + Final Carrier Check
   → PTT Key → 300ms settle → Audio Out → PTT Unkey
 
 DTMF path: dtmf-send CLI → POST localhost:18089/tx/raw → PTT + raw PCM tones
@@ -50,13 +51,12 @@ The AI doesn't just parrot responses. It maintains conversation context across a
 
 ### Prerequisites
 - Linux (tested on Debian/Ubuntu)
-- [OpenClaw](https://github.com/openclaw/openclaw) installed
+- [OpenClaw](https://github.com/openclaw/openclaw) installed and its gateway running
 - [DigiRig Mobile](https://digirig.net/) connected to your radio
 - An amateur radio license and a callsign
+- (Optional but recommended) an NVIDIA GPU if you want sub-second local STT. CPU-only works, adds 2–4 s of STT latency.
 
-> **Note:** Whisper (speech-to-text) is **not** required before installation. Once OpenClaw is running, your AI assistant can download, install, and configure the Whisper STT server for you — just ask it.
-
-### Install
+### 1. Install the plugin
 
 ```bash
 cd ~/src
@@ -66,73 +66,103 @@ npm install
 openclaw plugins install -l ~/src/digirig-openclaw-channel
 ```
 
-### Configure
+> **Guided setup (optional).** `bash scripts/setup.sh` walks you through the
+> remaining STT + TTS install steps with prompts. The manual walkthrough below
+> is what it runs under the hood — use whichever you prefer.
 
-The easiest way: let the plugin auto-detect your hardware:
+### 2. Configure hardware and identity
+
+Use `/digirig setup` to auto-detect your audio/PTT devices — it prints the exact config commands:
 
 ```bash
-/digirig setup    # detects audio devices, PTT serial, prints config commands
-/digirig doctor   # verifies everything is working
+/digirig setup
+/digirig doctor   # verify hardware + daemons
 ```
 
-Or configure manually:
+Copy the commands `setup` prints, then set your per-station identity:
 
 ```bash
-# Audio devices (find yours with: arecord -l && aplay -l)
-openclaw config set channels.digirig.audio.inputDevice "plughw:0,0"
-openclaw config set channels.digirig.audio.outputDevice "plughw:0,0"
-
-# PTT serial (find yours with: ls /dev/ttyUSB*)
-openclaw config set channels.digirig.ptt.device "/dev/ttyUSB0"
-openclaw config set channels.digirig.ptt.rts true
-
-# Your callsign
+# Callsign + on-air aliases (names operators might address the AI by).
+# `proactive` lets the AI respond when called by name; `direct-only` requires the full callsign.
 openclaw config set channels.digirig.tx.callsign "YOURCALL/AI"
+openclaw config set channels.digirig.tx.aliases "YourName,Alias1,Alias2"
 openclaw config set channels.digirig.tx.policy "proactive"
-openclaw config set channels.digirig.tx.aliases "YourName"
+
+# Persona — what the AI calls itself and where it operates. The plugin ships
+# with generic placeholders; set these per-instance.
+openclaw config set channels.digirig.persona.name "YourName"
+openclaw config set channels.digirig.persona.location "Your City, State"
+
+# Optional: regulars you want the AI to treat specially on the air.
+openclaw config set channels.digirig.persona.knownOperators \
+  '[{"callsign":"WB6DWP","note":"be cheeky and joke around"}]'
 ```
 
-### Recommended Tuning
+### 3. Install local STT (speech-to-text)
 
 ```bash
-# RX sensitivity
-openclaw config set channels.digirig.rx.energyThreshold 0.1
-openclaw config set channels.digirig.rx.carrierSenseThreshold 0.0008
-openclaw config set channels.digirig.rx.maxSilenceMs 250
-openclaw config set channels.digirig.rx.preRollMs 600
-
-# TX timing
-openclaw config set channels.digirig.ptt.leadMs 300
+bash scripts/setup-stt-daemon.sh
 ```
 
-### Set Up STT (Speech-to-Text)
+This creates a Python venv, installs `openai-whisper`, and registers a user
+systemd unit (`whisper-daemon.service`) that keeps `medium.en` hot in GPU VRAM
+for sub-second transcription. If the daemon is down at runtime, the plugin
+falls back to the `whisper` CLI — still works, adds 2–4 s of latency per
+transmission.
 
-You have two options:
+> **Roadmap note:** plugin-owned STT lifecycle (no user-owned systemd unit
+> required) is step 1 in [`docs/claude-redesign.md`](docs/claude-redesign.md).
+> Today the user runs the setup script; tomorrow the plugin does it.
 
-**Option A: Ask your AI to do it.** Once OpenClaw is running, just say:
-> *"Set up Whisper for DigiRig speech-to-text"*
+### 4. Pick a TTS backend
 
-Your AI assistant will download Whisper, install the hot-loaded daemon, and configure everything.
+The AI needs to speak. Choose one of three paths:
 
-**Option B: Run the script manually:**
+#### 4a. Local TTS via Piper (recommended — fastest, fully offline, no API keys)
+
 ```bash
-./scripts/setup-stt-daemon.sh
+bash scripts/setup-piper-daemon.sh
+openclaw config set channels.digirig.localTts.engine piper
 ```
 
-The hot-loaded daemon keeps the Whisper model in GPU VRAM for sub-second transcription. Without it, the system falls back to a slower CLI — still works, just adds 2-4 seconds of latency per transmission.
+Downloads a ~60 MB Piper binary + one ONNX voice, installs
+`piper-daemon.service`, and routes the plugin's TTS calls at
+`127.0.0.1:18090`. Slightly robotic voice but intelligible, ~100 ms synthesis.
 
-### Go Live
+#### 4b. Local TTS via Kokoro (more natural voice, slightly heavier)
+
+```bash
+bash scripts/setup-kokoro-daemon.sh
+openclaw config set channels.digirig.localTts.engine kokoro
+# Optional voice pick: af_sarah (default), af_bella, af_nicole, am_michael, am_adam, bf_emma
+openclaw config set channels.digirig.localTts.voice af_sarah
+```
+
+Downloads a ~310 MB ONNX model. ~200 ms synthesis on CPU, much more natural
+voice than Piper. Both daemons can be installed simultaneously — flip
+`localTts.engine` between them to A/B compare.
+
+#### 4c. Cloud TTS (via an OpenClaw-registered speech provider)
+
+Leave `localTts.engine` as its default (`"off"`). The plugin will route TTS
+through whichever cloud provider is configured under OpenClaw's
+`messages.tts.providers.*` (Google, OpenAI, ElevenLabs, etc.). Requires an API
+key and working internet.
+
+### 5. Go live
 
 ```bash
 openclaw gateway restart
+/digirig doctor            # everything should say "listening" / "active"
+node scripts/digirig-tail.cjs &
 ```
 
 Key up your radio: *"[YourName], this is [YourCall]. Radio check."*
 
-### Watch the Logs
+If anything goes sideways on air:
 
 ```bash
-node scripts/digirig-tail.cjs
+/digirig unkey             # emergency — drops PTT now, cancels queued TX
 ```
 
 ---
@@ -140,19 +170,20 @@ node scripts/digirig-tail.cjs
 ## Features in Detail
 
 ### Voice Operation
-- Dual-tier voice activity detection handles squelch tails and noise
-- 600ms pre-roll buffer captures the start of fast talkers
-- 250ms end-of-speech detection for snappy turn-taking
-- TTS speed configurable (default 1.25x for radio pacing)
-- Callsign auto-appended to every transmission
+- Dual-tier voice activity detection (energy to start, carrier-sense to sustain) handles squelch tails and mid-sentence pauses.
+- 600 ms pre-roll buffer captures the start of fast talkers.
+- 250 ms end-of-speech detection for snappy turn-taking.
+- Callsign auto-appended when the transmission is approaching the FCC 10-min ID window.
+- Latency acknowledgment: if the LLM hasn't produced text within `tones.timeoutMs` (default 2000 ms), a pre-generated "Stand by" tone is injected at the front of the TX queue.
 
 ### Anti-Doubling
-Three checks before every transmission:
-1. Wait for 800ms of channel silence
-2. Final energy sample right before PTT key
-3. Listen during 300ms PTT lead delay — abort if carrier detected
+Before every transmission:
+1. Wait for the busy-hold timer (`rx.busyHoldMs`, default 1000 ms) to clear.
+2. Apply a courtesy delay after the last RX (`tx.courtesyDelayMs`, default 2000 ms).
+3. Final `isCarrierPresent()` sample 50 ms before keying PTT.
 
-Up to 3 retries with 1200ms backoff. After 60 seconds of busy channel, drops the message instead of transmitting over someone.
+Up to 3 retries with 1200 ms backoff. After 60 s of a busy channel, drops the
+message rather than transmit over someone.
 
 ### DTMF Tones
 Standalone CLI generates pure dual-tone PCM and transmits via local TX API:
@@ -168,18 +199,20 @@ node scripts/dtmf-send.mjs --help
 Emergency sequences (911) blocked by default. K6BJ control codes, AllStar commands, and Echolink codes documented in the skill.
 
 ### APRS via findu.com
-No API key needed:
+No API key needed. Standalone CLI that the AI invokes via the `digirig-aprs` skill:
 
 ```bash
 # Locate a station
-web_fetch http://www.findu.com/cgi-bin/find.cgi?call=KN6TYR-1
+node scripts/aprs.mjs locate --call KN6TYR-1 --json
 
 # Read messages
-web_fetch http://www.findu.com/cgi-bin/msg.cgi?call=KE6AFE-2
+node scripts/aprs.mjs msg-get --call KE6AFE-2 --json
 
 # Send a message
-web_fetch http://www.findu.com/cgi-bin/sendmsg.cgi?fromcall=W6RGC&tocall=KE6AFE-2&msg=Hello
+node scripts/aprs.mjs msg-send --fromcall W6RGC --tocall KE6AFE-2 --msg "Hello" --json
 ```
+
+Set `FINDU_PASSWORD` in the gateway's environment to enable `set-position`.
 
 ### Callsign Fuzzy Matching
 Loads a club roster CSV on startup. When Whisper garbles a callsign, Levenshtein distance matching corrects it:
@@ -193,44 +226,68 @@ Operates under FCC Part 97 with a licensed control operator. If someone asks abo
 
 ---
 
-## Performance (April 2026)
+## Performance
+
+Typical observed latencies on the current build:
 
 | Metric | Value |
 |--------|-------|
-| STT latency | 300-900ms (hot daemon) |
-| LLM dispatch | 7-15s (Sonnet) |
-| PTT lead time | 300ms |
-| End-of-speech | 250ms |
+| STT (hot Whisper daemon) | 300–900 ms |
+| STT (cold `whisper` CLI fallback) | 2–4 s |
+| LLM dispatch | depends on agent & model |
+| PTT lead time | 300 ms |
+| End-of-speech | 250 ms |
 | Callsign roster | 141 entries (SCCARC) |
-| Anti-doubling | 3 checks + 3 retries |
+| Anti-doubling | courtesy delay + final carrier check, up to 3 retries |
 
 ---
 
 ## Project Structure
 
 ```
+index.ts                Plugin entry — channel registration, /digirig commands, digirig_tx tool
 src/
-  runtime.ts          Main loop, TX API, callsign matching
-  audio-monitor.ts    RX capture, VAD, carrier sensing
-  prompt.ts           15-section ham radio persona
-  ptt.ts              Serial PTT control
-  tts.ts              TTS synthesis + playback
-  config.ts           Configuration schema
-  defaults.ts         Default values
-  channel-core.ts     OpenClaw integration
+  runtime.ts            Four async workers (RX → STT → agent → TX), TX API on :18089
+  audio-monitor.ts      arecord + VAD with energy/carrier-sense thresholds
+  prompt/               Ham-radio persona split by concern (persona, perception, contracts, protocols, safety, capabilities, operators)
+  ptt.ts                Serial RTS PTT control
+  tts.ts                OpenClaw TTS runtime + aplay
+  config.ts             Zod config schema
+  defaults.ts           Default values
+  channel-core.ts       OpenClaw dispatch + per-channel LLM override
+  state.ts              Plugin runtime singleton
+  pipeline/
+    queue.ts            Async FIFO with priority unshift (latency acks)
+    audio-assets.ts     Eager-load WAVs into memory for low-latency injection
 
 scripts/
-  dtmf-send.mjs       DTMF tone CLI (zero dependencies)
-  digirig-tail.cjs    Pretty log viewer
+  setup.sh                 Guided install (wraps the setup-*.sh scripts below)
+  dtmf-send.mjs            DTMF tone CLI (zero dependencies)
+  aprs.mjs                 findu.com APRS helper
+  stt_daemon.py            Hot-loaded Whisper HTTP daemon on :18088
+  piper-daemon.py          Local Piper TTS HTTP daemon on :18090
+  kokoro-daemon.py         Local Kokoro-82M TTS HTTP daemon on :18091
+  setup-stt-daemon.sh      Installs whisper-daemon.service
+  setup-piper-daemon.sh    Installs piper-daemon.service + Piper binary + voice
+  setup-kokoro-daemon.sh   Installs kokoro-daemon.service + model + voices
+  digirig-tail.cjs         Pretty log viewer (auto-rotates at midnight)
+  generate-assets.sh       Regenerate standby/error tone WAVs under audio/
 
 skills/
-  digirig-tones/      DTMF skill + K6BJ/AllStar codes
+  digirig-tones/        DTMF skill + K6BJ/AllStar codes
+  digirig-aprs/         APRS via findu.com
 
 docs/
-  ROADMAP-CURRENT.md  Where this project is going
-  DESIGN.md           Architecture deep-dive
-  DTMF-DESIGN.md      DTMF CLI design document
-  SMOKE_TEST.md       Post-update test checklist
+  ROADMAP.md    Where this project is going
+  claude-redesign.md    Current plan of record: latency + simplicity
+  DESIGN.md             Architecture deep-dive
+  PIPELINE-THREADING.md Async-queue architecture + diagram
+  DESIGN_audio_assets.md Latency-ack WAV loading & TX injection
+  DTMF-DESIGN.md        DTMF CLI design document
+  PRD_latency_ack.md    Shipped
+  PRD_radio_llm_fallback.md  Shipped
+  SMOKE_TEST.md         Post-update test checklist
+  LIVE_TEST_PLAN.md     On-air validation scenarios
 ```
 
 ---
@@ -240,6 +297,7 @@ docs/
 | Command | Description |
 |---------|-------------|
 | `/digirig tx <message>` | Manual transmit |
+| `/digirig unkey` | **Emergency.** Drop PTT now, abort the in-flight TX, drain the TX queue. |
 | `/digirig doctor` | Diagnostics |
 | `/digirig setup` | Auto-detect devices |
 
@@ -247,24 +305,23 @@ docs/
 
 ## Where This Project Is Going
 
-See **[docs/ROADMAP-CURRENT.md](docs/ROADMAP-CURRENT.md)** for the full roadmap. Highlights:
+Two planning docs live in `docs/`:
 
-🔜 **Coming Soon:**
-- Faster radio model (Sonnet) for sub-10s responses
-- FCC 10-minute auto-ID timer
-- Improved Whisper hallucination filtering
+- **[docs/claude-redesign.md](docs/claude-redesign.md)** — the current plan of
+  record. Latency reduction, plugin-owned dependencies (no user-owned systemd),
+  simplicity over complexity. Cloud-first; local daemons only when they meaningfully
+  reduce round-trip latency.
+- **[docs/ROADMAP.md](docs/ROADMAP.md)** — feature roadmap.
 
-🔮 **On the Horizon:**
-- **CAT Control** — Full ICOM IC-705 integration (change frequency, mode, read S-meter)
-- **CW Send/Receive** — Morse code via ggmorse
-- **Offline APRS** — Direct RF packets via Direwolf on 144.390
-- **SSB Mode** — VAD-based speech detection without squelch
-- **Live Web Dashboard** — Real-time transcript, AI reasoning, active operators
-- **Offline Mode** — Local LLM + offline knowledge for field/emergency deployments
-- **Winlink** — Email over radio for emergency communications
-- **QSO Logging** — Automatic ADIF export for LoTW/eQSL
-
-See the [full roadmap](docs/ROADMAP-CURRENT.md) for details, priorities, and architecture notes.
+🔮 **On the horizon:**
+- **CAT Control** — ICOM IC-705 integration (frequency, mode, S-meter).
+- **CW Send/Receive** — Morse over `morse-send.mjs` + `ggmorse` for RX.
+- **Direct APRS via Direwolf** — 144.390 MHz packets without findu.com.
+- **SSB Mode** — VAD-based speech detection without squelch.
+- **Live Web Dashboard** — real-time transcript + AI reasoning.
+- **Offline Mode** — local LLM + offline knowledge base for ARES/field deployments.
+- **Winlink** — email over radio for emergency communications.
+- **QSO Logging** — automatic ADIF export for LoTW/eQSL.
 
 ---
 
@@ -275,7 +332,7 @@ This project is in active development. If you're a ham who codes (or a coder who
 **Key docs for contributors:**
 - [AGENT.md](AGENT.md) — Architecture decisions and gotchas
 - [docs/DESIGN.md](docs/DESIGN.md) — How the pipeline works
-- [docs/ROADMAP-CURRENT.md](docs/ROADMAP-CURRENT.md) — What needs building
+- [docs/ROADMAP.md](docs/ROADMAP.md) — What needs building
 
 ---
 

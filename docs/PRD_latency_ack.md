@@ -1,5 +1,9 @@
 # Product Requirements Document (PRD): Latency Acknowledgments & Unified TX Queue
 
+**Status: SHIPPED.** Implemented in `src/runtime.ts` (the `tonesTimer` block around
+the dispatch call) and `src/pipeline/audio-assets.ts`. Kept here for historical
+context and as the spec the implementation was built against.
+
 ## 1. Objective
 To provide a graceful, natural-sounding user experience over Ham Radio (via DigiRig) when the OpenClaw AI experiences latency due to tool usage or complex generation. By playing short audio acknowledgments ("stand by" tones/voice), the operator knows the system heard them and is processing the request, preventing duplicate transmissions and confusion.
 

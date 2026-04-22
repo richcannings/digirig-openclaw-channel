@@ -29,6 +29,13 @@ export class AsyncQueue<T> {
     });
   }
 
+  /** Removes and returns every currently-buffered item. Pending `pop()` callers are unaffected. */
+  drainSync(): T[] {
+    const items = this.queue;
+    this.queue = [];
+    return items;
+  }
+
   get length(): number {
     return this.queue.length;
   }

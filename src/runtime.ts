@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import * as http from "node:http";
 import { homedir, tmpdir } from "node:os";
@@ -10,33 +10,33 @@ import type { DigirigConfig } from "./config.js";
 import { AudioMonitor } from "./audio-monitor.js";
 import { PttController } from "./ptt.js";
 import { playPcm, synthesizeTts } from "./tts.js";
-import { HAM_RADIO_PROMPT } from "./prompt.js";
+import { buildHamRadioPrompt, containsPhoneticCallsign, formatSignalReport } from "./prompt/index.js";
 import { AsyncQueue } from "./pipeline/queue.js";
 import { AudioAssets } from "./pipeline/audio-assets.js";
 
+const LOCAL_WHISPER_URL = "http://127.0.0.1:18088/transcribe";
+const LOCAL_WHISPER_TIMEOUT_MS = 10_000;
+const TX_API_PORT = 18089;
+const TX_MAX_ATTEMPTS = 3;
+const TX_BACKOFF_MS = 1200;
+const POST_TX_MUTE_MS = 1500;
+const FCC_ID_INTERVAL_MS = 10 * 60 * 1000;
+const FCC_ID_POLL_MS = 60_000;
+const CALLSIGN_REGEX = /^[A-Z]{1,2}\d{1,4}[A-Z]{1,4}$/;
+
 export function appendCallsign(text: string, callsign?: string): string {
   const trimmed = text.trim();
-  if (!trimmed) {
-    return trimmed;
-  }
-  if (!callsign || !callsign.trim()) {
-    return trimmed;
-  }
-  
-  // Clean punctuation from both strings for comparison
+  if (!trimmed || !callsign?.trim()) return trimmed;
+
   const cleanText = trimmed.toUpperCase().replace(/[^A-Z0-9]/g, "");
   const cleanCallsign = callsign.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  
-  // Don't append if the clean text ends with the clean callsign
-  if (cleanText.endsWith(cleanCallsign)) {
-    return trimmed;
-  }
-  
-  // Also check if the AI spelled out the callsign phonetically near the end
-  if (trimmed.toUpperCase().includes("W6RGC") || trimmed.toLowerCase().includes("whiskey 6 romeo golf charlie") || trimmed.toLowerCase().includes("whiskey six romeo golf charlie")) {
-    return trimmed;
-  }
-  
+  if (cleanText.endsWith(cleanCallsign)) return trimmed;
+
+  // Suppress the append if the LLM already said the callsign phonetically
+  // ("whiskey six romeo golf charlie"). Shared helper — same spelling the
+  // prompt template uses, so the two sides of the contract stay in sync.
+  if (containsPhoneticCallsign(trimmed, callsign)) return trimmed;
+
   return `${trimmed} ${callsign}`;
 }
 
@@ -74,6 +74,8 @@ export type DigirigRuntime = {
   start: (ctx: ChannelGatewayStartContext<DigirigConfig>) => Promise<void>;
   stop: () => Promise<void>;
   speak: (text: string) => Promise<void>;
+  /** Operator safety: drop PTT now, abort any in-flight TX, and drop any queued TX jobs. */
+  emergencyUnkey: () => Promise<{ cancelledJobs: number }>;
 };
 
 type RxAudioJob = { sessionId: number; utterance: any };
@@ -170,14 +172,11 @@ function normalizeSttText(text: string): string {
 function loadKnownCallsigns(): string[] {
   try {
     const rosterPath = join(homedir(), ".openclaw", "workspace", "references", "sccarc-roster.csv");
-    const csv = require("node:fs").readFileSync(rosterPath, "utf8");
-    const lines = csv.split("\n").slice(1); // skip header
+    const csv = readFileSync(rosterPath, "utf8");
     const calls: string[] = [];
-    for (const line of lines) {
+    for (const line of csv.split("\n").slice(1)) {
       const call = line.split(",")[0]?.trim().toUpperCase();
-      if (call && /^[A-Z]{1,2}\d{1,4}[A-Z]{1,4}$/.test(call)) {
-        calls.push(call);
-      }
+      if (call && CALLSIGN_REGEX.test(call)) calls.push(call);
     }
     return calls;
   } catch {
@@ -263,6 +262,12 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     tailMs: config.ptt.tailMs,
   });
 
+  // Assembled once per channel lifetime. The channel is registered with
+  // `reload: { configPrefixes: ["channels.digirig"] }` so config changes to
+  // persona.* or tx.* tear this down and rebuild it — no need to re-render
+  // per message.
+  const hamRadioPrompt = buildHamRadioPrompt(config);
+
   const rxAudioQueue = new AsyncQueue<RxAudioJob | null>();
   const sttQueue = new AsyncQueue<SttJob | null>();
   const agentQueue = new AsyncQueue<AgentJob | null>();
@@ -275,6 +280,9 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
   let txApiServer: http.Server | null = null;
   let logger: ChannelGatewayStartContext<DigirigConfig>["log"] | null = null;
   let txInProgress = false;
+  // Abort handle for the TX job currently being executed (set by the TX worker,
+  // triggered by `emergencyUnkey()`). Null when the worker is idle.
+  let currentTxAbort: AbortController | null = null;
 
   const logDir = join(homedir(), ".openclaw", "logs");
   const logDate = getLocalDateStamp();
@@ -333,7 +341,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     hooks?: { onPttKeyed?: (atMs: number) => void; onAudioStart?: (atMs: number) => void },
     abortSignal?: AbortSignal,
   ) => {
-    const tts = await synthesizeTts(runtime, text);
+    const tts = await synthesizeTts(runtime, text, config);
     const bytesPerMs = tts.sampleRate * 2 / 1000;
     const audioMs = bytesPerMs > 0 ? Math.ceil(tts.audioBuffer.length / bytesPerMs) : 0;
     const muteMs = Math.max(0, config.ptt.leadMs + config.ptt.tailMs + audioMs + 500);
@@ -351,14 +359,12 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       txAbortController.abort();
     }, config.tx.maxTxMs);
 
-    const MAX_TX_ATTEMPTS = 3;
-    const BACKOFF_MS = 1200;
     try {
       let transmitted = false;
-      for (let attempt = 1; attempt <= MAX_TX_ATTEMPTS; attempt++) {
+      for (let attempt = 1; attempt <= TX_MAX_ATTEMPTS; attempt++) {
         const waitResult = await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 60000);
         if (waitResult === "timeout") {
-          logger?.warn?.(`[digirig] TX abandoned: channel busy for 60s (attempt ${attempt}/${MAX_TX_ATTEMPTS})`);
+          logger?.warn?.(`[digirig] TX abandoned: channel busy for 60s (attempt ${attempt}/${TX_MAX_ATTEMPTS})`);
           break;
         }
         if (lastRxEndAt > 0) {
@@ -369,7 +375,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             await delay(remainingCourtesyMs);
             if (audioMonitor.isCarrierPresent()) {
               logger?.info?.("[digirig] TX deferred: carrier detected after courtesy wait");
-              await delay(BACKOFF_MS);
+              await delay(TX_BACKOFF_MS);
               continue;
             }
           }
@@ -377,8 +383,8 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
         await delay(50);
         if (audioMonitor.isCarrierPresent()) {
-          logger?.info?.(`[digirig] TX deferred: carrier detected at final 50ms check (attempt ${attempt}/${MAX_TX_ATTEMPTS}, energy=${audioMonitor.getLastEnergy().toFixed(6)})`);
-          await delay(BACKOFF_MS);
+          logger?.info?.(`[digirig] TX deferred: carrier detected at final 50ms check (attempt ${attempt}/${TX_MAX_ATTEMPTS}, energy=${audioMonitor.getLastEnergy().toFixed(6)})`);
+          await delay(TX_BACKOFF_MS);
           continue;
         }
 
@@ -400,7 +406,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         } finally {
           if (config.ptt.tailMs > 0) await delay(config.ptt.tailMs);
           await ptt.setTx(false);
-          audioMonitor.muteFor(1500);
+          audioMonitor.muteFor(POST_TX_MUTE_MS);
         }
 
         await logTranscript("TX", text);
@@ -413,7 +419,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       }
 
       if (!transmitted) {
-        logger?.warn?.(`[digirig] TX dropped after ${MAX_TX_ATTEMPTS} attempts: "${text.slice(0, 80)}..."`);
+        logger?.warn?.(`[digirig] TX dropped after ${TX_MAX_ATTEMPTS} attempts: "${text.slice(0, 80)}..."`);
       }
     } finally {
       clearTimeout(maxTxTimer);
@@ -451,7 +457,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     } finally {
       if (config.ptt.tailMs > 0) await delay(config.ptt.tailMs);
       await ptt.setTx(false);
-      audioMonitor.muteFor(1500);
+      audioMonitor.muteFor(POST_TX_MUTE_MS);
     }
 
     await logEvent({ type: "TX_RAW", audioMs, sampleRate, label, summary: label ? `TX_RAW: ${label} tone (${audioMs}ms)` : undefined });
@@ -490,11 +496,11 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
     if (idTimer) clearInterval(idTimer);
     idTimer = setInterval(async () => {
-      if (lastTxAt > lastIdTxAt && Date.now() - lastIdTxAt >= 10 * 60 * 1000) {
+      if (lastTxAt > lastIdTxAt && Date.now() - lastIdTxAt >= FCC_ID_INTERVAL_MS) {
         ctx.log?.info?.("[digirig] 10-minute FCC ID timer triggered.");
         await speak(`This is ${config.tx.callsign} standing by.`);
       }
-    }, 60000);
+    }, FCC_ID_POLL_MS);
 
     const rxWorker = async () => {
       for (;;) {
@@ -514,14 +520,13 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         if (!job || runLoopAbort?.signal.aborted) break;
         const sttStartAt = Date.now();
         try {
-          const localCfg = (config.stt as any)?.localWhisper ?? {};
           const rawText = await transcribeWithLocalWhisper({
             pcm16: job.utterance.pcm,
             sampleRate: job.utterance.sampleRate ?? config.audio.sampleRate,
             log: ctx.log,
-            command: typeof localCfg.command === "string" ? localCfg.command : "whisper",
-            model: typeof localCfg.model === "string" ? localCfg.model : "base",
-            language: typeof (config.stt as any)?.language === "string" ? (config.stt as any).language : "en",
+            command: config.stt.cliFallback.command,
+            model: config.stt.cliFallback.model,
+            language: config.stt.language,
           });
           const normalizedText = normalizeSttText(rawText);
           const allKnown = [...knownCallsigns, ...heardCallsigns];
@@ -573,10 +578,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           );
           if (policy === "direct-only" && !direct) continue;
 
-          const signalReport = job.rmsDb
-            ? `\n[System Data: incoming audio signal strength was RMS ${job.rmsDb.toFixed(1)} dBFS, Peak ${job.peakDb?.toFixed(1)} dBFS. A signal around -20 is loud, -40 is soft, and below -50 is very weak/noisy.]`
-            : "";
-          const radioPrompt = `${HAM_RADIO_PROMPT}\n\n${signalReport}`;
+          const radioPrompt = `${hamRadioPrompt}\n${formatSignalReport(job.rmsDb, job.peakDb)}`;
           const ctxPayload = createRadioContextPayload(runtime, cfg, route, job.text, radioPrompt);
 
           await recordInboundSession(runtime, cfg, route, ctxPayload, ctx.log);
@@ -589,24 +591,23 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
           ctx.log?.info?.(`[digirig] dispatch reply start session=${job.sessionId}`);
           
+          // Latency ack: if the LLM doesn't deliver text within tones.timeoutMs, inject a
+          // short "standby" tone at the front of the TX queue so operators hear an ack
+          // instead of dead air. The timer is cancelled as soon as `didSpeak` flips true.
           let tonesTimer: NodeJS.Timeout | null = null;
           if (config.tones?.enabled) {
             tonesTimer = setTimeout(() => {
               tonesTimer = null;
-              if (didSpeak) return; // Voice beat the timer
-              
-              // Timer popped, inject acknowledgment beep
+              if (didSpeak) return;
               const standbyPcm = AudioAssets.get("standby") || AudioAssets.get("beep");
-              if (standbyPcm) {
-                ctx.log?.info?.(`[digirig] Latency timeout hit, injecting standby tone...`);
-                // Use unshift to jump the queue!
-                txQueue.unshift({
-                  kind: "raw",
-                  pcm: standbyPcm,
-                  sampleRate: config.audio.sampleRate,
-                  label: "standby"
-                });
-              }
+              if (!standbyPcm) return;
+              ctx.log?.info?.(`[digirig] Latency timeout hit, injecting standby tone...`);
+              txQueue.unshift({
+                kind: "raw",
+                pcm: standbyPcm,
+                sampleRate: config.audio.sampleRate,
+                label: "standby",
+              });
             }, config.tones.timeoutMs);
           }
 
@@ -628,14 +629,17 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
                 replyText = replyText.slice(senderMatch[0].length);
                 ctx.log?.info?.(`[digirig] sender identified by LLM: ${detectedSender}`);
                 const baseSender = detectedSender.split("-")[0];
-                if (baseSender && /^[A-Z]{1,2}\d{1,4}[A-Z]{1,4}$/.test(baseSender)) heardCallsigns.add(baseSender);
+                if (baseSender && CALLSIGN_REGEX.test(baseSender)) heardCallsigns.add(baseSender);
               }
 
               const shortReply = formatRadioReply(replyText);
               if (!shortReply || !isSpeakableStreamingReply(shortReply)) return;
 
               let txText = shortReply;
-              if (Date.now() - lastIdTxAt > 9 * 60 * 1000) txText = appendCallsign(shortReply, config.tx.callsign);
+              // Append callsign if we're approaching the FCC 10-min ID deadline.
+              if (Date.now() - lastIdTxAt > FCC_ID_INTERVAL_MS - 60_000) {
+                txText = appendCallsign(shortReply, config.tx.callsign);
+              }
               ctx.log?.info?.(`[digirig] reply deliver: ${txText}`);
               didSpeak = true;
               if (tonesTimer) {
@@ -650,8 +654,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
           });
           const dispatchEndAt = Date.now();
           if (tonesTimer) clearTimeout(tonesTimer);
-          
-          // Check for LLM dispatch failures to play error tone
+
           if (config.tones?.enabled && (!dispatchResult || dispatchResult.finalText === undefined)) {
             const errorPcm = AudioAssets.get("error");
             if (errorPcm) {
@@ -660,7 +663,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
                 kind: "raw",
                 pcm: errorPcm,
                 sampleRate: config.audio.sampleRate,
-                label: "error"
+                label: "error",
               });
             }
           }
@@ -696,20 +699,31 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         const job = await txQueue.pop();
         if (!job || runLoopAbort?.signal.aborted) break;
         txInProgress = true;
+        const jobAbort = new AbortController();
+        currentTxAbort = jobAbort;
+        // If the job brought its own abort signal, fold it into the per-job controller.
+        const parentAbort = job.abortSignal;
+        const parentHandler = () => jobAbort.abort();
+        if (parentAbort) {
+          parentAbort.addEventListener("abort", parentHandler, { once: true });
+          if (parentAbort.aborted) jobAbort.abort();
+        }
         try {
           if (job.kind === "text") {
             logger?.info?.(`[digirig] Audio input: ${job.text}`);
-            await executeTextTx(job.text, job.hooks);
+            await executeTextTx(job.text, job.hooks, jobAbort.signal);
           } else {
-            await executeRawTx(job.pcm, job.sampleRate, job.label);
+            await executeRawTx(job.pcm, job.sampleRate, job.label, jobAbort.signal);
           }
           job.done?.resolve();
         } catch (err) {
           logger?.error?.(`[digirig] TX sequence failed: ${String(err)}`);
           try { await ptt.setTx(false); } catch {}
-          audioMonitor.muteFor(1500);
+          audioMonitor.muteFor(POST_TX_MUTE_MS);
           job.done?.reject(err);
         } finally {
+          if (parentAbort) parentAbort.removeEventListener("abort", parentHandler);
+          currentTxAbort = null;
           txInProgress = false;
         }
       }
@@ -746,7 +760,6 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
 
     audioMonitor.start();
 
-    const TX_API_PORT = 18089;
     try {
       txApiServer = http.createServer((req, res) => {
         if (req.method === "GET" && req.url?.startsWith("/tx/status")) {
@@ -835,7 +848,41 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     await ptt.close();
   };
 
-  return { start, stop, speak };
+  // Operator safety hatch: invoked from `/digirig unkey`. Drops PTT the moment
+  // the command is received, aborts the in-flight TX (if any), and rejects every
+  // queued TX job so the gateway doesn't pick back up where it left off.
+  const emergencyUnkey = async () => {
+    logger?.warn?.("[digirig] EMERGENCY UNKEY — dropping PTT, cancelling queued TX");
+
+    // 1. PTT down immediately, independent of whatever the TX worker is doing.
+    try { await ptt.setTx(false); } catch (err) {
+      logger?.error?.(`[digirig] emergencyUnkey: ptt.setTx(false) failed: ${String(err)}`);
+    }
+
+    // 2. Abort the currently-executing TX job. The TX worker will fall through
+    //    its catch block, which also calls ptt.setTx(false) defensively.
+    currentTxAbort?.abort();
+
+    // 3. Drain any queued TX jobs and reject their awaiters so callers of
+    //    `speak()` / `enqueueTxJob()` see a clean failure instead of a hang.
+    const dropped = txQueue.drainSync().filter((j): j is TxJob => j !== null);
+    for (const job of dropped) {
+      job.done?.reject(new Error("TX cancelled by /digirig unkey"));
+    }
+
+    // 4. Mute the audio monitor for a moment so we don't self-trigger on our
+    //    own tail. Same window as a normal end-of-TX.
+    audioMonitor.muteFor(POST_TX_MUTE_MS);
+
+    await logEvent({
+      type: "TX_UNKEY",
+      summary: `TX_UNKEY: dropped ${dropped.length} queued job(s)`,
+      droppedJobs: dropped.length,
+    });
+    return { cancelledJobs: dropped.length };
+  };
+
+  return { start, stop, speak, emergencyUnkey };
 }
 
 async function transcribeWithLocalWhisper(params: {
@@ -869,31 +916,31 @@ async function transcribeWithLocalWhisper(params: {
   header.writeUInt32LE(pcm16.length, 40);
   const wavBuffer = Buffer.concat([header, pcm16]);
 
-  // 1) Attempt to use the hot-loaded STT daemon (Ultra-fast, ~0.5s latency)
+  // Fast path: the hot-loaded daemon on 127.0.0.1:18088 keeps the Whisper model in VRAM.
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000); // 10s inference timeout
-    const res = await fetch("http://127.0.0.1:18088/transcribe", {
+    const timeout = setTimeout(() => controller.abort(), LOCAL_WHISPER_TIMEOUT_MS);
+    const res = await fetch(LOCAL_WHISPER_URL, {
       method: "POST",
       body: wavBuffer,
       headers: { "Content-Type": "audio/wav" },
-      signal: controller.signal
+      signal: controller.signal,
     });
     clearTimeout(timeout);
-    
+
     if (res.ok) {
-      const json = await res.json() as { text?: string };
+      const json = (await res.json()) as { text?: string };
       log?.info?.(`[digirig] STT source: hot-loaded daemon (ultra-fast)`);
       return (json.text || "").trim();
     }
   } catch (err: any) {
-    // If ECONNREFUSED or aborted, the daemon isn't running. Fall back silently.
+    // ECONNREFUSED / fetch TypeError = daemon absent, fall through quietly.
     if (err.name !== "TypeError" && err.code !== "ECONNREFUSED") {
       log?.warn?.(`[digirig] STT daemon failed, falling back to cold-start CLI: ${String(err)}`);
     }
   }
 
-  // 2) Fallback to the cold-start CLI execution (Slower, ~3s latency)
+  // Cold-start fallback: invoke the `whisper` CLI. Works without the daemon but adds 2-4 s.
   log?.info?.(`[digirig] STT source: local whisper CLI (cold start)`);
   const dir = await fs.mkdtemp(join(tmpdir(), "digirig-whisper-"));
   const wavPath = join(dir, "rx.wav");

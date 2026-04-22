@@ -18,9 +18,16 @@ export const DEFAULT_RX_CARRIER_SENSE_THRESHOLD = 0.0008;
 
 export const DEFAULT_TX_CALLSIGN = "N0CALL/AI";
 export const DEFAULT_TX_POLICY = "direct-only" as const;
-export const DEFAULT_TX_ALIASES = "Seven,7,Overlord";
+// Additional on-air names operators might use to address the AI. Empty by default —
+// set this per-instance. Example: "Seven,7,Overlord".
+export const DEFAULT_TX_ALIASES = "";
 export const DEFAULT_TX_MAX_DURATION_MS = 120000;
 export const DEFAULT_TX_COURTESY_DELAY_MS = 2000;
 
-
-
+// Persona defaults. These are generic fallbacks so the plugin out-of-the-box
+// doesn't impersonate a specific station. Set `channels.digirig.persona.*` to
+// configure per-instance.
+export const DEFAULT_PERSONA_NAME = "Station";
+export const DEFAULT_PERSONA_LOCATION = "";
+// Empty string means "derive from tx.callsign by stripping trailing /AI".
+export const DEFAULT_PERSONA_CONTROL_OPERATOR = "";

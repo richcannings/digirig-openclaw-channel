@@ -156,30 +156,20 @@ function formatLogEntry(line) {
   }
 }
 
+const LOGS_DIR = path.join(process.env.HOME, '.openclaw', 'logs');
+
+// Returns the newest digirig-YYYY-MM-DD.log under ~/.openclaw/logs, or null.
+// Uses filename sort (lexicographic = chronological for the YYYY-MM-DD format).
 function findLatestLogFile() {
-  const logsDir = path.join(process.env.HOME, '.openclaw', 'logs');
-  const today = new Date().toISOString().split('T')[0];
-  const logFile = path.join(logsDir, `digirig-${today}.log`);
-  
-  if (fs.existsSync(logFile)) {
-    return logFile;
-  }
-  
-  // If today's file doesn't exist, find the most recent one
   try {
-    const files = fs.readdirSync(logsDir)
-      .filter(f => f.startsWith('digirig-') && f.endsWith('.log'))
-      .sort()
-      .reverse();
-    
-    if (files.length > 0) {
-      return path.join(logsDir, files[0]);
-    }
-  } catch (error) {
-    // Directory might not exist
+    const files = fs.readdirSync(LOGS_DIR)
+      .filter((f) => /^digirig-\d{4}-\d{2}-\d{2}\.log$/.test(f))
+      .sort();
+    const last = files[files.length - 1];
+    return last ? path.join(LOGS_DIR, last) : null;
+  } catch {
+    return null;
   }
-  
-  return null;
 }
 
 function printHeader() {
@@ -192,53 +182,91 @@ function printHeader() {
   console.log('');
 }
 
+// Show this many lines of history on startup and after a rotation. Enough to
+// cover the last few QSOs, short enough not to flood the screen.
+const HISTORY_LINES = 30;
+
+function spawnTailProcess(logFile, { fromStart = false } = {}) {
+  // -F (capital) = follow by filename; reopens the file if it's replaced or
+  // truncated in place. That covers same-name rotation. We handle NEW filenames
+  // (e.g. midnight date rollover) separately by watching the logs dir below.
+  const nFlag = fromStart ? '+1' : String(HISTORY_LINES);
+  const args = ['-F', '-n', nFlag, logFile];
+  const tail = spawn('tail', args);
+
+  let buffer = '';
+  tail.stdout.on('data', (chunk) => {
+    buffer += chunk.toString();
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const formatted = formatLogEntry(trimmed);
+      if (formatted) console.log(formatted);
+    }
+  });
+  tail.stderr.on('data', (data) => {
+    const msg = data.toString().trim();
+    if (msg) process.stderr.write(`${colors.red}tail: ${msg}${colors.reset}\n`);
+  });
+  return tail;
+}
+
 function main() {
-  const logFile = process.argv[2] || findLatestLogFile();
-  
-  if (!logFile) {
+  const explicitLogFile = process.argv[2];
+  let currentLogFile = explicitLogFile || findLatestLogFile();
+
+  if (!currentLogFile) {
     console.error(`${colors.red}Error: No DigiRig log file found.${colors.reset}`);
     console.error(`${colors.dim}Usage: ${process.argv[1]} [log-file-path]${colors.reset}`);
     console.error(`${colors.dim}Expected: ~/.openclaw/logs/digirig-YYYY-MM-DD.log${colors.reset}`);
     process.exit(1);
   }
-  
-  if (!fs.existsSync(logFile)) {
-    console.error(`${colors.red}Error: Log file not found: ${logFile}${colors.reset}`);
+
+  if (!fs.existsSync(currentLogFile)) {
+    console.error(`${colors.red}Error: Log file not found: ${currentLogFile}${colors.reset}`);
     process.exit(1);
   }
-  
+
   printHeader();
-  console.log(`${colors.dim}Following: ${logFile}${colors.reset}`);
+  console.log(`${colors.dim}Following: ${currentLogFile}${colors.reset}`);
   console.log('');
-  
-  // Use tail -f to follow the file
-  const tail = spawn('tail', ['-f', logFile]);
-  
-  tail.stdout.on('data', (data) => {
-    const lines = data.toString().split('\n').filter(line => line.trim());
-    
-    for (const line of lines) {
-      const formatted = formatLogEntry(line.trim());
-      if (formatted) {
-        console.log(formatted);
-      }
+
+  let tail = spawnTailProcess(currentLogFile);
+
+  // Watch the logs directory so we can switch to a newer file when it appears
+  // (e.g. midnight rollover, or a manual rotate). Skip if the user passed an
+  // explicit file on the CLI — they've asked for that specific file.
+  let dirWatcher = null;
+  if (!explicitLogFile) {
+    try {
+      dirWatcher = fs.watch(LOGS_DIR, (_eventType, filename) => {
+        if (!filename) return;
+        if (!/^digirig-\d{4}-\d{2}-\d{2}\.log$/.test(filename)) return;
+        const candidate = findLatestLogFile();
+        if (!candidate || candidate === currentLogFile) return;
+        // Newer file appeared. Switch.
+        console.log('');
+        console.log(`${colors.dim}${colors.cyan}── log rotated to ${path.basename(candidate)} ──${colors.reset}`);
+        console.log('');
+        tail.kill();
+        currentLogFile = candidate;
+        tail = spawnTailProcess(currentLogFile);
+      });
+    } catch (err) {
+      console.error(`${colors.yellow}warning: could not watch ${LOGS_DIR} for rotations: ${err.message}${colors.reset}`);
     }
-  });
-  
-  tail.stderr.on('data', (data) => {
-    console.error(`${colors.red}tail error: ${data}${colors.reset}`);
-  });
-  
-  tail.on('close', (code) => {
-    console.log(`${colors.yellow}Log monitoring stopped (exit code: ${code})${colors.reset}`);
-  });
-  
-  // Handle Ctrl+C gracefully
-  process.on('SIGINT', () => {
-    console.log(`\n${colors.dim}Stopping log monitor...${colors.reset}`);
-    tail.kill();
+  }
+
+  const shutdown = (signal) => {
+    console.log(`\n${colors.dim}Stopping log monitor (${signal})...${colors.reset}`);
+    if (dirWatcher) dirWatcher.close();
+    if (tail) tail.kill();
     process.exit(0);
-  });
+  };
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 if (require.main === module) {

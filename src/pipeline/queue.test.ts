@@ -40,4 +40,15 @@ describe("AsyncQueue", () => {
     queue.unshift("Delayed Priority");
     expect(await p2).toBe("Delayed Priority");
   });
+
+  it("drainSync returns buffered items and empties the queue", () => {
+    queue.push("A");
+    queue.push("B");
+    queue.push("C");
+    expect(queue.length).toBe(3);
+
+    const drained = queue.drainSync();
+    expect(drained).toEqual(["A", "B", "C"]);
+    expect(queue.length).toBe(0);
+  });
 });

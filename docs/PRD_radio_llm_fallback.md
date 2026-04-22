@@ -1,5 +1,10 @@
 # Product Requirements Document (PRD): Configurable Radio LLM & Offline Fallback
 
+**Status: SHIPPED.** Implemented in `src/channel-core.ts` (the agent-model override
+block in `dispatchRadioReply`) and exposed via `channels.digirig.llm.{model,
+offlineFallbackModel}` in the Zod schema. Kept here as the spec the implementation
+was built against.
+
 ## 1. Objective
 To maximize on-air response speed and ensure system survivability during internet outages by allowing the DigiRig channel to specify its own distinct LLM (independent of the global OpenClaw default) and supporting automatic fallback to a local offline model (e.g., Ollama).
 

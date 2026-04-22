@@ -58,6 +58,12 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
     }),
   },
   status: {
+    // Opt out of OpenClaw's 30-minute stale-socket health check. That check is
+    // designed for network-backed chat channels (Slack, Telegram long-polling)
+    // where no inbound events for 30 min means the websocket is dead. DigiRig
+    // is a physical radio — 30 min of quiet on the repeater is normal
+    // operation, not a reason to kill arecord and restart the channel.
+    skipStaleSocketHealthCheck: true,
     defaultRuntime: {
       accountId: DEFAULT_ACCOUNT_ID,
       running: false,
@@ -85,7 +91,10 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
       const runtime = getRuntime();
       const cfg = getDigirigRuntime().config.loadConfig();
       const callsign = cfg.channels?.digirig?.tx?.callsign ?? DEFAULT_TX_CALLSIGN;
-      await runtime.speak(appendCallsign(text, callsign));
+      // Strip any [SENDER:CALLSIGN] prefix the LLM emits (see prompt/contracts.ts
+      // section 9). That tag is plugin-internal metadata and must never be spoken.
+      const stripped = text.replace(/^\s*\[SENDER:[A-Z0-9\/-]+\]\s*/i, "");
+      await runtime.speak(appendCallsign(stripped, callsign));
       return { channel: "digirig", messageId: `digirig-${Date.now()}` };
     },
   },
@@ -129,13 +138,12 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
   // @ts-expect-error plugin api shape is provided by OpenClaw at runtime
   api.registerChannel({ plugin: digirigPlugin });
 
+  const usage = "Usage: /digirig tx <text> | /digirig unkey | /digirig doctor | /digirig setup";
+
   const handleDigirigCommand = async (ctx: { args?: string }) => {
     const raw = (ctx.args ?? "").trim();
     if (!raw) {
-      return {
-        text:
-          "Usage: /digirig tx <text> | /digirig doctor | /digirig setup",
-      };
+      return { text: usage };
     }
     const [cmd, ...rest] = raw.split(/\s+/);
     const action = cmd.toLowerCase();
@@ -148,39 +156,63 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
       const cfg = getDigirigRuntime().config.loadConfig();
       const callsign = cfg.channels?.digirig?.tx?.callsign ?? DEFAULT_TX_CALLSIGN;
       await runtime.speak(appendCallsign(text, callsign));
-      return { text: "✅ Transmitted via DigiRig" };
+      return { text: "Transmitted via DigiRig" };
+    }
+
+    if (action === "unkey") {
+      if (!runtime) {
+        return { text: "DigiRig runtime is not running — nothing to unkey." };
+      }
+      const { cancelledJobs } = await runtime.emergencyUnkey();
+      return {
+        text: cancelledJobs > 0
+          ? `PTT released. Cancelled ${cancelledJobs} queued TX job${cancelledJobs === 1 ? "" : "s"}.`
+          : "PTT released.",
+      };
     }
 
     if (action === "doctor") {
       const cfg = getDigirigRuntime().config.loadConfig();
-      const wsUrl = cfg.channels?.digirig?.stt?.wsUrl ?? "ws://127.0.0.1:28080";
-      const serviceName = cfg.channels?.digirig?.stt?.whisperLiveService ?? "whisperlive.service";
-      const [active, enabled, listener, audioIn, audioOut, serial] = await Promise.all([
-        runShellCapture("systemctl", ["--user", "is-active", serviceName]),
-        runShellCapture("systemctl", ["--user", "is-enabled", serviceName]),
+      const ttsEngine = cfg.channels?.digirig?.localTts?.engine ?? "off";
+      const [listener, audioIn, audioOut, serial] = await Promise.all([
         runShellCapture("ss", ["-ltn"]),
         runShellCapture("arecord", ["-l"]),
         runShellCapture("aplay", ["-l"]),
         runShellCapture("bash", ["-lc", "ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null | head -n 1"]),
       ]);
-      const listening = listener.stdout.includes(":28080") || listener.stdout.includes(":18080");
+      const sttListening = listener.stdout.includes(":18088");
+      const txApiListening = listener.stdout.includes(":18089");
+      const piperListening = listener.stdout.includes(":18090");
+      const kokoroListening = listener.stdout.includes(":18091");
       const inputDevice = detectLikelyAlsaDevice(audioIn.stdout) ?? "plughw:0,0";
       const outputDevice = detectLikelyAlsaDevice(audioOut.stdout) ?? "plughw:0,0";
       const pttDevice = serial.stdout.trim() || "/dev/ttyUSB0";
+
+      // Flag only the TTS daemon the plugin is currently configured to use.
+      // Other daemons being up/down is informational rather than blocking.
+      const ttsLines: string[] = [];
+      if (ttsEngine === "piper") {
+        ttsLines.push(`- TTS engine: piper (127.0.0.1:18090) — ${piperListening ? "listening" : "NOT LISTENING — run bash scripts/setup-piper-daemon.sh"}`);
+      } else if (ttsEngine === "kokoro") {
+        ttsLines.push(`- TTS engine: kokoro (127.0.0.1:18091) — ${kokoroListening ? "listening" : "NOT LISTENING — run bash scripts/setup-kokoro-daemon.sh"}`);
+      } else {
+        ttsLines.push(`- TTS engine: cloud (localTts.engine=off) — requires an OpenClaw speech provider configured under messages.tts.providers.*`);
+        if (piperListening) ttsLines.push(`  (note: Piper daemon IS running on :18090 — set localTts.engine=piper to use it)`);
+        if (kokoroListening) ttsLines.push(`  (note: Kokoro daemon IS running on :18091 — set localTts.engine=kokoro to use it)`);
+      }
+
       const lines = [
         "DigiRig doctor:",
-        `- STT wsUrl: ${wsUrl}`,
-        `- WhisperLive service: ${serviceName}`,
-        `- service active: ${active.ok ? active.stdout.trim() : "no"}`,
-        `- service enabled: ${enabled.ok ? enabled.stdout.trim() : "no"}`,
-        `- STT listener present: ${listening ? "yes" : "no"}`,
+        `- STT daemon (127.0.0.1:18088): ${sttListening ? "listening" : "not listening (falls back to whisper CLI)"}`,
+        `- TX API (127.0.0.1:18089): ${txApiListening ? "listening" : "not listening — is the gateway running?"}`,
+        ...ttsLines,
         `- detected input device: ${inputDevice}`,
         `- detected output device: ${outputDevice}`,
         `- detected PTT serial: ${pttDevice}`,
         "",
-        "If needed:",
-        `systemctl --user enable --now ${serviceName}`,
-        "openclaw gateway restart",
+        "If the STT daemon isn't running: bash scripts/setup-stt-daemon.sh",
+        "If the TX API isn't running:     openclaw gateway restart",
+        "Full guided install:             bash scripts/setup.sh",
       ];
       return { text: lines.join("\n") };
     }
@@ -195,11 +227,21 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
 
       const lines = [
         "Quick setup commands:",
-        "npm run setup:quickstart",
-        `openclaw config set channels.digirig.audio.inputDevice \"${inputDevice}\"`,
-        `openclaw config set channels.digirig.audio.outputDevice \"${outputDevice}\"`,
-        `openclaw config set channels.digirig.ptt.device \"${pttDevice}\"`,
+        "",
+        "# Hardware",
+        `openclaw config set channels.digirig.audio.inputDevice "${inputDevice}"`,
+        `openclaw config set channels.digirig.audio.outputDevice "${outputDevice}"`,
+        `openclaw config set channels.digirig.ptt.device "${pttDevice}"`,
         "openclaw config set channels.digirig.ptt.rts true",
+        "",
+        "# Identity (REQUIRED — the defaults are generic placeholders)",
+        'openclaw config set channels.digirig.tx.callsign "YOURCALL/AI"',
+        'openclaw config set channels.digirig.tx.aliases "Seven,7,Overlord"',
+        'openclaw config set channels.digirig.persona.name "Seven"',
+        'openclaw config set channels.digirig.persona.location "Your City, State"',
+        '# Known operators (optional):',
+        '# openclaw config set channels.digirig.persona.knownOperators \'[{"callsign":"WB6DWP","note":"be cheeky - have fun with this operator"}]\'',
+        "",
         "openclaw gateway restart",
         "",
         "Then run: /digirig doctor",
@@ -207,17 +249,14 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
       return { text: lines.join("\n") };
     }
 
-    return {
-      text:
-        "Usage: /digirig tx <text> | /digirig doctor | /digirig setup",
-    };
+    return { text: usage };
   };
 
   // Manual TX command: /digirig tx <text>
   // @ts-expect-error plugin api shape is provided by OpenClaw at runtime
   api.registerCommand({
     name: "digirig",
-    description: "DigiRig commands (tx, doctor, setup)",
+    description: "DigiRig commands (tx, unkey, doctor, setup)",
     acceptsArgs: true,
     requireAuth: false,
     handler: handleDigirigCommand,

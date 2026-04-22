@@ -18,20 +18,25 @@ description: >
 
 ## Command Reference
 
-All commands use:
+All commands use the **absolute path to `aprs.mjs` that the system prompt tells
+you to use** (it's computed at plugin load time from the plugin's install
+directory — do NOT guess or hardcode a path):
+
 ```
-node /home/richc/src/digirig-openclaw-channel/scripts/aprs.mjs <command> [options] --json
+node <path-to-aprs.mjs> <command> [options] --json
 ```
+
+In the examples below, `<aprs>` is shorthand for that same `node <path-to-aprs.mjs>` prefix.
 
 ### Get Messages
 ```
-node /home/richc/src/digirig-openclaw-channel/scripts/aprs.mjs msg-get --call CALLSIGN --json
+<aprs> msg-get --call CALLSIGN --json
 ```
 Returns recent APRS messages to/from the callsign.
 
 ### Send a Message
 ```
-node /home/richc/src/digirig-openclaw-channel/scripts/aprs.mjs msg-send --fromcall FROMCALL --tocall TOCALL --msg "message text" --json
+<aprs> msg-send --fromcall FROMCALL --tocall TOCALL --msg "message text" --json
 ```
 - **The operator MUST provide their from-callsign.** Do not assume or fill in a from-callsign.
 - Message text is limited to 50 characters.
@@ -39,17 +44,17 @@ node /home/richc/src/digirig-openclaw-channel/scripts/aprs.mjs msg-send --fromca
 
 ### Locate a Station
 ```
-node /home/richc/src/digirig-openclaw-channel/scripts/aprs.mjs locate --call CALLSIGN --json
+<aprs> locate --call CALLSIGN --json
 ```
 Returns latitude, longitude, description (distance/bearing from nearest city), and when the last position report was received.
 
 ### Report Position
 ```
-node /home/richc/src/digirig-openclaw-channel/scripts/aprs.mjs set-position --call CALLSIGN --lat 37.0 --lon -122.0 --json
+<aprs> set-position --call CALLSIGN --lat 37.0 --lon -122.0 --json
 ```
 Or using Maidenhead grid square:
 ```
-node /home/richc/src/digirig-openclaw-channel/scripts/aprs.mjs set-position --call CALLSIGN --grid CM87wj --json
+<aprs> set-position --call CALLSIGN --grid CM87wj --json
 ```
 Optional: `--speed`, `--course`, `--alt`
 
@@ -58,25 +63,25 @@ Optional: `--speed`, `--course`, `--alt`
 ## Exact Steps for Each Request
 
 ### When an operator asks to check APRS messages:
-1. Speak: *"Checking APRS messages for [callsign]. W6RGC/AI"*
-2. Run: `node .../aprs.mjs msg-get --call CALLSIGN --json`
+1. Speak: *"Checking APRS messages for [callsign]. <your callsign>"*
+2. Run: `<aprs> msg-get --call CALLSIGN --json`
 3. Read the JSON result and relay the messages (or "no messages found") to the operator.
 
 ### When an operator asks to send an APRS message:
 1. **Ask the operator for their callsign** if they haven't provided it. You must have a from-callsign.
-2. Confirm: *"Sending APRS message from [from] to [to]: [message]. W6RGC/AI"*
-3. Run: `node .../aprs.mjs msg-send --fromcall FROM --tocall TO --msg "message" --json`
+2. Confirm: *"Sending APRS message from [from] to [to]: [message]. <your callsign>"*
+3. Run: `<aprs> msg-send --fromcall FROM --tocall TO --msg "message" --json`
 4. Confirm success or report error.
 
 ### When an operator asks where a station is:
-1. Speak: *"Looking up [callsign] on APRS. W6RGC/AI"*
-2. Run: `node .../aprs.mjs locate --call CALLSIGN --json`
+1. Speak: *"Looking up [callsign] on APRS. <your callsign>"*
+2. Run: `<aprs> locate --call CALLSIGN --json`
 3. Relay the location description, coordinates, and last-heard time.
 
 ### When an operator asks to report a position:
 1. Gather callsign and position (lat/lon or grid square) from the operator.
-2. Speak: *"Sending position report for [callsign]. W6RGC/AI"*
-3. Run: `node .../aprs.mjs set-position --call CALLSIGN --lat LAT --lon LON --json`
+2. Speak: *"Sending position report for [callsign]. <your callsign>"*
+3. Run: `<aprs> set-position --call CALLSIGN --lat LAT --lon LON --json`
 4. Confirm success or report error.
 
 ## Critical Rules
@@ -86,4 +91,4 @@ Optional: `--speed`, `--course`, `--alt`
 - **Messages are limited to 50 characters.** If the operator's message is too long, ask them to shorten it.
 - **Position reporting requires FINDU_PASSWORD.** If not configured, say so — don't guess credentials.
 - **One request at a time.** findu.com prohibits automated/repetitive scraping. Each command should correspond to an operator request.
-- Always identify (W6RGC/AI) before and after APRS operations.
+- Always identify with your configured callsign before and after APRS operations.
