@@ -1,2 +1,19 @@
 node_modules/
-docs/voice-call-refactor-attempt/
+
+# OS / editor scratch
+.DS_Store
+*.swp
+
+# Backups / conflict artifacts
+*.bak
+*.orig
+
+# Local TTS / STT daemon workspaces. These are installed out-of-tree by
+# scripts/setup-*.sh but older attempts sometimes landed copies under the repo.
+venv/
+.venv/
+piper/
+
+# Ad-hoc scratch files people create while debugging.
+test-*.wav
+audio/test_*.wav
