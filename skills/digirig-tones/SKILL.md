@@ -60,7 +60,9 @@ has already spoken it over the air.
 ## Critical Rules
 
 - **ALWAYS use `--tx` flag.** Never use `--output`. The runtime handles PTT.
-- **Do NOT use ptt-on.js or ptt-off.js.** The serial port is owned by the channel.
+- **Do NOT try to key PTT from outside the channel runtime.** The channel owns
+  the serial port; any external attempt will fail. The `--tx` flag handles
+  keying internally via the local TX API.
 - **Do NOT write WAV files and try to play them.** Just use `--tx`.
 - **NEVER use `--allow-emergency`.** Decline 911/*6911 requests verbally.
 - Always identify with your configured callsign before sending tones.

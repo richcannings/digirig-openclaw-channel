@@ -9,14 +9,14 @@ This is the first in a family of radio signal CLI tools (DTMF, Morse code, etc.)
 ## Current Implementation (Shipped, July 2026)
 
 The sections below are the original design record. What actually ships today
-differs on two important points — read this first, then treat the rest of the
+differs in three important ways — read this first, then treat the rest of the
 document as historical context:
 
 1. **PTT is managed by the plugin runtime, not the CLI.** `dtmf-send.mjs --tx`
    POSTs the raw PCM to a local HTTP endpoint (`http://127.0.0.1:18089/tx/raw`)
    exposed by `src/runtime.ts`. The runtime owns the serial port and does the
-   keying. Users never invoke `ptt-on.js` / `ptt-off.js` — those exist only
-   in `archive/` as a "don't repeat this" marker.
+   keying. There is no external PTT toggle — attempts to key PTT from outside
+   the running channel will fail because the port is exclusively locked.
 
 2. **Voice ack + tones is one atomic call, not a sequence of separate steps.**
    `dtmf-send.mjs --tx --say "TEXT" SEQUENCE` first POSTs `TEXT` to
@@ -126,34 +126,6 @@ Operator requests DTMF
 - *"Copy, sending DTMF seven six seven for K6BJ time announcement. W6RGC/AI"* → sends tones
 - *"Copy, K6BJ temperature is code seven six eight. Transmitting now. W6RGC/AI"* → sends tones
 - *"I don't have the codes for that repeater. Do you have the DTMF sequence?"* → waits for operator
-
-## On-Air Sequence
-
-> **Superseded.** The three-step sequence below (separate voice cycle, then
-> separate PTT-scripted DTMF cycle) is not what ships. See "Current
-> Implementation" at the top of this document — voice ack and tones now run
-> as a single atomic `--say` call through the FIFO TX queue, with PTT owned
-> by the runtime.
-
-The AI handles DTMF requests in a three-step sequence:
-
-```
-Step 1 — Voice confirmation + station ID (existing TTS/PTT pipeline):
-  AI speaks: "Copy, transmitting DTMF seven six eight for K6BJ temperature. W6RGC/AI"
-  PTT keys → 300ms lead → TTS audio plays → PTT unkeys
-
-Step 2 — DTMF tones (standalone CLI, separate PTT cycle):
-  AI keys PTT (ptt-on.js)
-  AI runs: dtmf-send --output plughw:0,0 --lead-ms 300 768
-  AI unkeys PTT (ptt-off.js)
-
-Step 3 — Listen for result:
-  AI monitors for repeater response (e.g., time/temperature announcement)
-```
-
-**Important:** The CLI does NOT manage PTT. It only generates audio. PTT keying/unkeying is handled by the calling code (the DigiRig channel runtime or a wrapper script).
-
-**Why voice first:** FCC requires station identification. The AI must identify as W6RGC/AI before transmitting any signal. Speaking the callsign via TTS before the DTMF tones satisfies this requirement and also tells the operator (and anyone listening) what's about to happen.
 
 ## CLI Specification
 
@@ -475,34 +447,6 @@ Repeater-specific DTMF code reference. The AI reads this file when an operator a
 ```
 
 Additional repeater code files can be added as the AI operates on other repeaters (e.g., `references/w6qap-codes.md`). The AI can also be asked to research codes for unfamiliar repeaters and save them for future use.
-
-### Integration with DigiRig Channel
-
-> **Superseded.** Neither Pattern A (manual `ptt-on.js` / `ptt-off.js`) nor
-> Pattern B (deferred wrapper script) is what ships. The runtime exposes
-> `/tx/raw` and `/tx/text` HTTP endpoints on port 18089; `dtmf-send.mjs --tx
-> --say TEXT SEQUENCE` uses both to deliver voice-then-tones atomically.
-> See "Current Implementation" at the top of this document.
-
-The AI calls the CLI as a follow-up after its voice response. Two integration patterns:
-
-**Pattern A — Sequential (current implementation):**
-```
-1. AI resolves the DTMF sequence (from operator, knowledge base, or web search)
-2. AI generates voice text: "Copy, K6BJ temperature is code 768. Transmitting now. W6RGC/AI"
-3. speak() handles voice TTS + PTT as normal (keys, speaks, unkeys)
-4. AI keys PTT manually:     node ptt-on.js /dev/ttyUSB1
-5. AI runs DTMF CLI:         node dtmf-send.mjs --output plughw:0,0 --lead-ms 300 768
-6. AI unkeys PTT:            node ptt-off.js /dev/ttyUSB1
-7. AI listens for repeater response
-```
-
-The `--lead-ms` value should match the DigiRig channel's `ptt.leadMs` config (currently **300ms**). This ensures the radio and repeater have time to fully open before the first tone. The AI reads this value from the channel config and passes it through.
-
-The `--output` device matches the DigiRig channel's `audio.outputDevice` config (currently `plughw:0,0`).
-
-**Pattern B — Combined (future optimization):**
-A wrapper script or runtime enhancement that keeps PTT keyed across both voice and DTMF, eliminating the gap between voice ID and tones. This is a future improvement once the basic flow is proven.
 
 ## Future: Radio Signal CLI Family
 

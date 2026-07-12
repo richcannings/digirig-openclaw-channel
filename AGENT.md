@@ -117,13 +117,13 @@ docs/
   DESIGN_audio_assets.md — Latency-ack WAV loading
 
 archive/
-  dtmf-experiment/     — Old TTS-based DTMF (failed approach, kept as a "don't repeat" marker)
-  stale-docs/          — Superseded documents (incl. tts-streaming-design.md, referenced from docs/)
+  stale-docs/tts-streaming-design.md — deferred streaming-TTS exploration
+                                       (referenced from docs/ROADMAP.md V6)
 ```
 
 ## Don't Do These Things
 - Don't route DTMF through TTS — it doesn't work (frequencies get filtered)
-- Don't try to use ptt-on.js/ptt-off.js while the channel is running (port lock)
+- Don't try to key PTT from outside the channel runtime — the serial port is exclusively owned by the channel (port lock)
 - Don't assume the AI can execute shell commands reliably from the radio session — tool calling is inconsistent
 - Don't hardcode callsigns — use config values
 - Don't log personal info from the SCCARC roster (it contains only callsigns + names, not contact info)
