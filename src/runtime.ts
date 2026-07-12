@@ -307,35 +307,17 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
       throw new Error("Carrier detected");
     }
 
+    // Mute the audio monitor BEFORE keying the PTT.
+    // A half-duplex radio cannot hear anything while keyed up, and the
+    // electrical pop of keying the PTT will trigger a false positive carrier.
+    audioMonitor.muteFor(muteMs);
+
     await ptt.open();
     await ptt.setTx(true);
     if (config.ptt.leadMs > 0) {
-      const listenMs = Math.max(30, config.ptt.leadMs - 30);
-      await delay(listenMs);
-      const carrier = audioMonitor.isCarrierPresent();
-      const busy = audioMonitor.getBusy();
-      if (carrier || busy) {
-        const energy = audioMonitor.getLastEnergy();
-        await ptt.setTx(false);
-        logger?.info?.(`[digirig] RAW TX aborted during lead delay: isCarrierPresent=${carrier}, energy=${energy.toFixed(6)}, threshold=${config.rx.carrierSenseThreshold}, getBusy=${busy}`);
-        await logEvent({
-          type: "TX_RAW_ABORT",
-          stage: "lead-delay",
-          energy,
-          threshold: config.rx.carrierSenseThreshold,
-          isCarrierPresent: carrier,
-          getBusy: busy,
-          label,
-          audioMs,
-          summary: `TX_RAW_ABORT: lead-delay (energy=${energy.toFixed(6)}, carrier=${carrier}, busy=${busy})`,
-        });
-        throw new Error("Carrier detected during lead delay");
-      }
-      const remaining = config.ptt.leadMs - listenMs;
-      if (remaining > 0) await delay(remaining);
+      await delay(config.ptt.leadMs);
     }
 
-    audioMonitor.muteFor(muteMs);
     try {
       await playPcm({ device: config.audio.outputDevice, sampleRate, channels: 1, pcm, signal: abortSignal });
     } finally {
@@ -649,6 +631,32 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         if (req.method === "GET" && req.url?.startsWith("/tx/status")) {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: true, txInProgress }));
+          return;
+        }
+        if (req.method === "POST" && req.url?.startsWith("/tx/text")) {
+          const chunks: Buffer[] = [];
+          req.on("data", (chunk: Buffer) => chunks.push(chunk));
+          req.on("end", async () => {
+            try {
+              const text = Buffer.concat(chunks).toString("utf8").trim();
+              if (!text) {
+                res.writeHead(400, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ ok: false, error: "Empty body" }));
+                return;
+              }
+              ctx.log?.info?.(`[digirig] TEXT TX enqueued: chars=${text.length}, queueDepth=${txQueue.length}`);
+              await enqueueTxJob({ kind: "text", text });
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ ok: true, chars: text.length }));
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : String(err);
+              ctx.log?.error?.(`[digirig] TX API text error: ${msg}`);
+              if (!res.writableEnded) {
+                res.writeHead(500, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ ok: false, error: msg }));
+              }
+            }
+          });
           return;
         }
         if (req.method === "POST" && req.url?.startsWith("/tx/raw")) {

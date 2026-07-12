@@ -21,6 +21,7 @@ function parseArgs(argv) {
     amplitude: 0.3, voiceScale: 1.0, sampleRate: 16000,
     dryRun: false, wavOut: null, verbose: false, json: false,
     allowEmergency: false, tx: false, txUrl: "http://127.0.0.1:18089/tx/raw",
+    say: null,
     help: false, sequence: null,
   };
   const rest = argv.slice(2);
@@ -41,6 +42,7 @@ function parseArgs(argv) {
     else if (a === "--voice-scale" && rest[i + 1]) { args.voiceScale = Number(rest[++i]); }
     else if (a === "--sample-rate" && rest[i + 1]) { args.sampleRate = Number(rest[++i]); }
     else if (a === "--wav-out" && rest[i + 1]) { args.wavOut = rest[++i]; }
+    else if (a === "--say" && rest[i + 1]) { args.say = rest[++i]; }
     else if (!a.startsWith("--")) { args.sequence = a; }
     else { console.error(`Unknown option: ${a}`); process.exit(1); }
   }
@@ -72,6 +74,8 @@ OPTIONS:
   --json                 Output results as JSON
   --tx                   Transmit via DigiRig runtime API (handles PTT automatically)
   --tx-url <url>         DigiRig TX API URL (default: http://127.0.0.1:18089/tx/raw)
+  --say <text>           Speak text before sending tones (uses /tx/text). Requires --tx.
+                         Ensures voice ack always precedes tones, atomically queued.
   --allow-emergency      Allow emergency sequences (911, 78911). Blocked by default.
   --help                 Show this help message
 
@@ -269,6 +273,23 @@ async function main() {
   // Transmit via DigiRig runtime API (handles PTT)
   if (args.tx) {
     try {
+      // If --say is provided, speak the ack first via /tx/text. This POST
+      // blocks until the voice has fully played out (FIFO queue in the
+      // runtime), guaranteeing voice-before-tones ordering.
+      if (args.say) {
+        const textUrl = args.txUrl.replace(/\/tx\/raw$/, "/tx/text");
+        const sayRes = await fetch(textUrl, {
+          method: "POST",
+          body: args.say,
+          headers: { "Content-Type": "text/plain" },
+        });
+        const sayBody = await sayRes.json();
+        if (!sayBody.ok) {
+          if (args.json) console.log(JSON.stringify({ ok: false, error: `--say failed: ${sayBody.error}` }));
+          else console.error(`ERROR: --say failed: ${sayBody.error}`);
+          process.exit(3);
+        }
+      }
       const url = `${args.txUrl}?sampleRate=${args.sampleRate}`;
       const res = await fetch(url, {
         method: "POST",
@@ -281,6 +302,7 @@ async function main() {
         else console.error(`ERROR: ${body.error}`);
         process.exit(3);
       }
+      if (args.say) result.message = `Spoke ack + ${result.message}`;
       output(args, result);
     } catch (e) {
       if (args.json) console.log(JSON.stringify({ ok: false, error: e.message }));

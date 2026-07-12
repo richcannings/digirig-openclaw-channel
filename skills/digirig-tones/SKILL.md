@@ -11,21 +11,30 @@ description: >
 
 # DigiRig Tones
 
-## DTMF Transmission — Exact Steps
+## DTMF Transmission — One Atomic Command
 
-**Step 1:** Speak confirmation via `digirig_tx` tool:
-  *"Copy, sending DTMF seven six eight for temperature. <your callsign>"*
+Run this via the `exec` tool. Use the **absolute path to `dtmf-send.mjs`
+that the system prompt tells you to use** (it's computed at plugin load
+time from the plugin's install directory — do NOT guess or hardcode a
+path):
 
-**Step 2:** Run this command via `exec` tool. Use the **absolute path to
-`dtmf-send.mjs` that the system prompt tells you to use** (it's computed at
-plugin load time from the plugin's install directory — do NOT guess or
-hardcode a path):
 ```
-node <path-to-dtmf-send.mjs> --tx --json SEQUENCE
+node <path-to-dtmf-send.mjs> --tx --json --say "ACK TEXT" SEQUENCE
 ```
-Replace SEQUENCE with the digits. The `--tx` flag handles PTT automatically via the local TX API.
 
-**Step 3:** Listen for repeater response.
+- `--say "ACK TEXT"` speaks a voice acknowledgment BEFORE the tones. The
+  runtime queues speech and tones in FIFO order, so the operator hears
+  the ack first and the tones second — automatically.
+- Include your callsign in the ack, e.g. `"Copy, sending DTMF seven six
+  seven. W6RGC stroke A I."`
+- The `--tx` flag handles PTT automatically via the local TX API.
+- Replace SEQUENCE with the digits.
+
+Your final assistant message after invoking this tool should be brief
+(e.g. "Standing by. Over.") — do NOT repeat the ack, because the tool
+has already spoken it over the air.
+
+**Then listen for repeater response.**
 
 ## Repeater Code Lookup
 
@@ -37,16 +46,16 @@ Replace SEQUENCE with the digits. The `--tx` flag handles PTT automatically via 
 
 ## Common K6BJ Codes (Quick Reference)
 
-| Request | Code | Argument |
-|---------|------|----------|
-| Time | 767 | `--tx --json 767` |
-| Temperature | 768 | `--tx --json 768` |
-| Voltage | 769 | `--tx --json 769` |
-| Link status | *70 | `--tx --json "*70"` |
-| Connect AllStar | *3 + node | `--tx --json "*360216"` |
-| Disconnect AllStar | *1 + node | `--tx --json "*160216"` |
-| Disconnect all | *76 | `--tx --json "*76"` |
-| Help | *920 | `--tx --json "*920"` |
+| Request | Code | Argument (fill in the ack text) |
+|---------|------|----------------------------------|
+| Time | 767 | `--tx --json --say "..." 767` |
+| Temperature | 768 | `--tx --json --say "..." 768` |
+| Voltage | 769 | `--tx --json --say "..." 769` |
+| Link status | *70 | `--tx --json --say "..." "*70"` |
+| Connect AllStar | *3 + node | `--tx --json --say "..." "*360216"` |
+| Disconnect AllStar | *1 + node | `--tx --json --say "..." "*160216"` |
+| Disconnect all | *76 | `--tx --json --say "..." "*76"` |
+| Help | *920 | `--tx --json --say "..." "*920"` |
 
 ## Critical Rules
 

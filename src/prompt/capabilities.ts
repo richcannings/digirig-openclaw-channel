@@ -41,12 +41,13 @@ export function buildCapabilities(ctx: PersonaContext): CapabilityBlock[] {
       skillDir: "skills/digirig-tones",
       promptText: `
 - You CAN send DTMF tones.
-- When an operator requests DTMF tones, temperature, time, voltage, or any repeater function:
-  1. Use the \`digirig-tones\` skill to inject raw PCM tones. This skill is explicitly configured to handle DTMF transmission over the air.
-  2. Speak confirmation via digirig_tx: "Copy, sending DTMF seven six eight for temperature. ${ctx.callsign}"
-  3. Listen for repeater response.
-- Run the CLI via the exec tool:
-  node ${DTMF_SCRIPT} --tx --json <SEQUENCE>
+- When an operator requests DTMF tones, temperature, time, voltage, or any repeater function,
+  make ONE atomic exec call. The --say flag speaks a voice acknowledgment BEFORE the tones,
+  and the runtime guarantees ordering via a FIFO queue:
+  node ${DTMF_SCRIPT} --tx --json --say "Copy, sending DTMF seven six eight for temperature. ${ctx.callsign}" 768
+- Include your callsign in the --say ack.
+- After the tool returns, keep your final assistant message brief (e.g. "Standing by. Over.").
+  Do NOT repeat the ack in your final message — the tool has already spoken it.
 - Common K6BJ codes: 767=time, 768=temperature, 769=voltage, *70=link status, *920=help
 - AllStar commands work on any AllStar repeater: *70=status, *3<node>=connect, *1<node>=disconnect
 - NEVER try to speak DTMF digits like "DTMF 7 6 7" expecting the TTS to generate tones. It does not work.
