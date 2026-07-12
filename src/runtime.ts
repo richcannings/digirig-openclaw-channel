@@ -285,17 +285,50 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
     const audioMs = bytesPerMs > 0 ? Math.ceil(pcm.length / bytesPerMs) : 0;
     const muteMs = Math.max(0, config.ptt.leadMs + config.ptt.tailMs + audioMs + 500);
 
+    logger?.info?.(`[digirig] RAW TX starting: audioMs=${audioMs}, sampleRate=${sampleRate}, label=${label ?? "-"}`);
+
     const waitResult = await waitForClearChannel(audioMonitor, config.rx.busyHoldMs, 60000);
     if (waitResult === "timeout") throw new Error("Channel busy for 60s");
-    if (audioMonitor.isCarrierPresent()) throw new Error("Carrier detected");
+    if (audioMonitor.isCarrierPresent()) {
+      const energy = audioMonitor.getLastEnergy();
+      const busy = audioMonitor.getBusy();
+      logger?.info?.(`[digirig] RAW TX aborted at pre-check: isCarrierPresent=true, energy=${energy.toFixed(6)}, threshold=${config.rx.carrierSenseThreshold}, getBusy=${busy}`);
+      await logEvent({
+        type: "TX_RAW_ABORT",
+        stage: "pre-check",
+        energy,
+        threshold: config.rx.carrierSenseThreshold,
+        isCarrierPresent: true,
+        getBusy: busy,
+        label,
+        audioMs,
+        summary: `TX_RAW_ABORT: pre-check (energy=${energy.toFixed(6)}, busy=${busy})`,
+      });
+      throw new Error("Carrier detected");
+    }
 
     await ptt.open();
     await ptt.setTx(true);
     if (config.ptt.leadMs > 0) {
       const listenMs = Math.max(30, config.ptt.leadMs - 30);
       await delay(listenMs);
-      if (audioMonitor.isCarrierPresent() || audioMonitor.getBusy()) {
+      const carrier = audioMonitor.isCarrierPresent();
+      const busy = audioMonitor.getBusy();
+      if (carrier || busy) {
+        const energy = audioMonitor.getLastEnergy();
         await ptt.setTx(false);
+        logger?.info?.(`[digirig] RAW TX aborted during lead delay: isCarrierPresent=${carrier}, energy=${energy.toFixed(6)}, threshold=${config.rx.carrierSenseThreshold}, getBusy=${busy}`);
+        await logEvent({
+          type: "TX_RAW_ABORT",
+          stage: "lead-delay",
+          energy,
+          threshold: config.rx.carrierSenseThreshold,
+          isCarrierPresent: carrier,
+          getBusy: busy,
+          label,
+          audioMs,
+          summary: `TX_RAW_ABORT: lead-delay (energy=${energy.toFixed(6)}, carrier=${carrier}, busy=${busy})`,
+        });
         throw new Error("Carrier detected during lead delay");
       }
       const remaining = config.ptt.leadMs - listenMs;
@@ -631,9 +664,10 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
               }
               const url = new URL(req.url!, `http://127.0.0.1:${TX_API_PORT}`);
               const sampleRate = Number(url.searchParams.get("sampleRate")) || config.audio.sampleRate;
-              await enqueueTxJob({ kind: "raw", pcm, sampleRate });
               const bytesPerMs = sampleRate * 2 / 1000;
               const audioMs = bytesPerMs > 0 ? Math.ceil(pcm.length / bytesPerMs) : 0;
+              ctx.log?.info?.(`[digirig] RAW TX enqueued: audioMs=${audioMs}, sampleRate=${sampleRate}, queueDepth=${txQueue.length}`);
+              await enqueueTxJob({ kind: "raw", pcm, sampleRate });
               res.writeHead(200, { "Content-Type": "application/json" });
               res.end(JSON.stringify({ ok: true, audioMs, sampleRate }));
             } catch (err: unknown) {
