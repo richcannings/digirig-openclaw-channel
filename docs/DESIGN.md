@@ -119,8 +119,11 @@ plugin-managed lifecycle path (no user systemd) remains step 1 in
 
 ## Ports
 - **18088** — local Whisper STT daemon (HTTP, plugin → daemon).
-- **18089** — TX API (`/tx/status`, `/tx/raw` — used by `dtmf-send.mjs` and future
-  out-of-process callers).
+- **18089** — TX API. Endpoints:
+  - `/tx/status` — is a TX currently in progress
+  - `/tx/raw` — enqueue raw PCM (DTMF tones, future CW)
+  - `/tx/text` — enqueue text for TTS + speak; used by `dtmf-send.mjs --say`
+    to guarantee voice-before-tones ordering via the FIFO TX queue
 - **18090** — local Piper TTS daemon (HTTP, plugin → daemon) when
   `localTts.engine="piper"`.
 - **18091** — local Kokoro TTS daemon (HTTP, plugin → daemon) when

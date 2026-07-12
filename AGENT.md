@@ -41,6 +41,13 @@ Daemons expose a shared HTTP contract (`POST /tts` with `{text}`, returns raw 16
 - Previous approach (TTS pipeline routing) failed — tones not decoded by repeater
 - Current: standalone `scripts/dtmf-send.mjs` generates raw PCM sine waves
 - `--tx` flag POSTs to TX API (port 18089) which handles PTT
+- `--say TEXT` flag speaks a voice ack FIRST via `POST /tx/text`, then plays tones via
+  `POST /tx/raw`. Both jobs go through the same FIFO TX queue, so voice-before-tones
+  ordering is guaranteed regardless of LLM behavior. The AI is instructed via the
+  `digirig-tones` skill to always use `--say` for on-air DTMF.
+- `executeRawTx` mutes the AudioMonitor BEFORE keying PTT (matching voice-TX). Do NOT
+  add a post-keyup carrier check: the DigiRig's own keyup transient saturates the RX
+  line at ~1000× the carrier-sense threshold and would false-abort every attempt.
 - 911 emergency sequences blocked by default (`--allow-emergency` required)
 
 ### Prompt Structure (src/prompt/)
@@ -84,7 +91,8 @@ src/
     audio-assets.ts    — Eager-loaded tone WAV cache
 
 scripts/
-  dtmf-send.mjs            — DTMF tone CLI (POSTs raw PCM to :18089/tx/raw)
+  dtmf-send.mjs            — DTMF tone CLI (raw PCM to :18089/tx/raw; optional
+                            --say TEXT plays voice ack first via :18089/tx/text)
   aprs.mjs                 — findu.com APRS helper
   stt_daemon.py            — Hot-loaded Whisper HTTP daemon on :18088
   piper-daemon.py          — Piper TTS HTTP daemon on :18090

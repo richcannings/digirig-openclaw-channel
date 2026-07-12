@@ -6,6 +6,44 @@ A standalone CLI tool for generating and transmitting DTMF (Dual-Tone Multi-Freq
 
 This is the first in a family of radio signal CLI tools (DTMF, Morse code, etc.) that follow the same pattern: standalone executables the AI invokes via shell, packaged as OpenClaw skills for discoverability and knowledge.
 
+## Current Implementation (Shipped, July 2026)
+
+The sections below are the original design record. What actually ships today
+differs on two important points — read this first, then treat the rest of the
+document as historical context:
+
+1. **PTT is managed by the plugin runtime, not the CLI.** `dtmf-send.mjs --tx`
+   POSTs the raw PCM to a local HTTP endpoint (`http://127.0.0.1:18089/tx/raw`)
+   exposed by `src/runtime.ts`. The runtime owns the serial port and does the
+   keying. Users never invoke `ptt-on.js` / `ptt-off.js` — those exist only
+   in `archive/` as a "don't repeat this" marker.
+
+2. **Voice ack + tones is one atomic call, not a sequence of separate steps.**
+   `dtmf-send.mjs --tx --say "TEXT" SEQUENCE` first POSTs `TEXT` to
+   `/tx/text` (a companion endpoint added for this purpose) and blocks until
+   the voice has fully played out, then POSTs the raw PCM to `/tx/raw`.
+   Both jobs go through the same FIFO TX queue in `src/runtime.ts`, so the
+   ordering is guaranteed by the plugin, not by the LLM. This eliminates the
+   race that used to happen when the LLM tried to sequence voice + tones
+   across multiple tool calls or via its final assistant message.
+
+3. **Anti-doubling for raw TX mirrors voice TX.** `executeRawTx` mutes the
+   AudioMonitor BEFORE keying PTT, then delays the configured `leadMs`, then
+   plays. There is no post-keyup carrier check: the DigiRig's own keyup
+   transient saturates the RX line at ~1000× the carrier-sense threshold
+   (measured: 0.5–0.7 vs. `0.0008`), and a check there caught the AI's own
+   signal every time.
+
+Typical exec call the LLM makes on-air:
+```
+node scripts/dtmf-send.mjs --tx --json --say "Copy, sending seven six eight. W6RGC/AI." 768
+```
+
+For repeater codes see `skills/digirig-tones/references/k6bj-codes.md` and
+`skills/digirig-tones/references/allstar-commands.md`.
+
+---
+
 ## Why Standalone CLI
 
 The previous DTMF implementation failed because tones were routed through the TTS synthesis pipeline, which filtered/distorted the dual-tone frequencies. A standalone CLI writes raw PCM directly to the audio device — no TTS, no filters, no intermediaries.
@@ -90,6 +128,12 @@ Operator requests DTMF
 - *"I don't have the codes for that repeater. Do you have the DTMF sequence?"* → waits for operator
 
 ## On-Air Sequence
+
+> **Superseded.** The three-step sequence below (separate voice cycle, then
+> separate PTT-scripted DTMF cycle) is not what ships. See "Current
+> Implementation" at the top of this document — voice ack and tones now run
+> as a single atomic `--say` call through the FIFO TX queue, with PTT owned
+> by the runtime.
 
 The AI handles DTMF requests in a three-step sequence:
 
@@ -433,6 +477,12 @@ Repeater-specific DTMF code reference. The AI reads this file when an operator a
 Additional repeater code files can be added as the AI operates on other repeaters (e.g., `references/w6qap-codes.md`). The AI can also be asked to research codes for unfamiliar repeaters and save them for future use.
 
 ### Integration with DigiRig Channel
+
+> **Superseded.** Neither Pattern A (manual `ptt-on.js` / `ptt-off.js`) nor
+> Pattern B (deferred wrapper script) is what ships. The runtime exposes
+> `/tx/raw` and `/tx/text` HTTP endpoints on port 18089; `dtmf-send.mjs --tx
+> --say TEXT SEQUENCE` uses both to deliver voice-then-tones atomically.
+> See "Current Implementation" at the top of this document.
 
 The AI calls the CLI as a follow-up after its voice response. Two integration patterns:
 

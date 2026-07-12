@@ -189,12 +189,19 @@ message rather than transmit over someone.
 Standalone CLI generates pure dual-tone PCM and transmits via local TX API:
 
 ```bash
-# Send K6BJ temperature code
+# Send K6BJ temperature code (tones only)
 node scripts/dtmf-send.mjs --tx --json 768
+
+# Atomic voice ack + tones (recommended; guarantees voice-before-tones ordering)
+node scripts/dtmf-send.mjs --tx --json --say "Copy, sending 768. W6RGC/AI." 768
 
 # All options
 node scripts/dtmf-send.mjs --help
 ```
+
+`--say TEXT` posts the ack to `/tx/text` (blocks until spoken via the FIFO TX queue),
+then posts the DTMF PCM to `/tx/raw`. The AI uses `--say` for every on-air DTMF via
+the `digirig-tones` skill.
 
 Emergency sequences (911) blocked by default. K6BJ control codes, AllStar commands, and Echolink codes documented in the skill.
 

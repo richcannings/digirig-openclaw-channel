@@ -21,8 +21,14 @@
   out in the last 10 min.
 - [x] **DTMF Tones** — Standalone `scripts/dtmf-send.mjs` + `/tx/raw` API on port
   18089. Verified on K6BJ.
+- [x] **DTMF voice-first ordering** — `--say TEXT` flag on `dtmf-send.mjs` posts a
+  voice ack to a new `/tx/text` endpoint before the tones; both jobs FIFO through
+  the same TX queue so voice always precedes tones. Removes reliance on the
+  LLM's final assistant message for the ack.
 - [x] **Anti-Doubling** — Busy-hold wait + courtesy delay + final 50 ms carrier
-  check + up to 3 retries with 1200 ms backoff.
+  check + up to 3 retries with 1200 ms backoff (voice TX). Raw-TX path now
+  mirrors this by muting before keying instead of checking after — the previous
+  post-keyup check caught the AI's own keyup transient on the DigiRig.
 - [x] **PTT Lead Time** — Tuned to 300 ms; prevents clipped first syllables.
 - [x] **FCC Compliance** — Part 97 awareness in the prompt.
 - [x] **APRS Skill** — Read/send messages + locate stations via findu.com.
