@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./img/logo.jpg" alt="DigiRig OpenClaw Logo" width="220" />
+</p>
+
 # 📻 DigiRig OpenClaw Channel
 
 ### The world's first AI ham radio operator.
