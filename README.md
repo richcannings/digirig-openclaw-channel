@@ -30,6 +30,8 @@ Try it on your repeater!
 
 ## How It Works
 
+![DigiRig OpenClaw Channel Architecture](./img/architecture.jpg)
+
 ```
 Radio → DigiRig USB → Audio Capture → Speech Detection (dual-tier VAD)
   → Callsign Fuzzy Matching (SCCARC roster)

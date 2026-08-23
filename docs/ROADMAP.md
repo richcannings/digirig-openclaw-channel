@@ -124,6 +124,13 @@ existing `llm.offlineFallbackModel` hook; adds local TTS and an offline knowledg
 corpus (Kiwix).
 **Status:** Research needed.
 
+### P2-6: Dynamic On-Air Model Switching & Offline Circuit Breaker
+**Description:** Combines on-air voice switching (`digirig_set_model` tool) with an
+automatic transport-layer network watchdog. If cloud APIs fail, it instantly re-routes
+to local `ollama/nemotron-3.5-lightning` without requiring LLM reasoning.
+See [PRD_dynamic_model_switching_and_offline_circuit_breaker.md](./PRD_dynamic_model_switching_and_offline_circuit_breaker.md).
+**Status:** Planned / Documented.
+
 ---
 
 ## 🟣 Priority 3 — Backlog
