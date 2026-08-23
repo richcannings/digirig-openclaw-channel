@@ -27,7 +27,7 @@ import {
 export { appendCallsign };
 
 const LOCAL_WHISPER_URL = "http://127.0.0.1:18088/transcribe";
-const LOCAL_WHISPER_TIMEOUT_MS = 10_000;
+const LOCAL_WHISPER_TIMEOUT_MS = 30_000;
 const TX_API_PORT = 18089;
 const TX_MAX_ATTEMPTS = 3;
 const TX_BACKOFF_MS = 1200;

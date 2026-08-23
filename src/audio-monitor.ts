@@ -254,9 +254,9 @@ export class AudioMonitor extends EventEmitter {
     const rmsDb = 20 * Math.log10(fullRms || 1e-9);
     const peakDb = 20 * Math.log10(peak || 1e-9);
 
-    const initialRms = computeRms(pcm.subarray(0, Math.min(pcm.length, 32000)));
-    if (initialRms < this.config.energyThreshold * 0.5) {
-      this.emit("log", `discarded low-energy clip (initialRms=${initialRms.toFixed(4)})`);
+    // Discard clip only if peak energy never reached half of energyThreshold (e.g. noise glitch)
+    if (peak < this.config.energyThreshold * 0.5) {
+      this.emit("log", `discarded low-energy clip (peak=${peak.toFixed(4)}, fullRms=${fullRms.toFixed(4)})`);
       return;
     }
 

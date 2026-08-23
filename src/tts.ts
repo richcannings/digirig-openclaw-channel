@@ -48,7 +48,8 @@ async function synthesizeLocalTts(
   text: string,
 ): Promise<TtsResult> {
   const engine = local.engine as "piper" | "kokoro";
-  const baseUrl = local.url?.trim() || defaultUrlForEngine(engine);
+  const rawUrl = local.url?.trim() || defaultUrlForEngine(engine);
+  const baseUrl = rawUrl.replace(/\/tts\/?$/, "").replace(/\/+$/, "");
   const body: Record<string, unknown> = { text };
   if (local.voice) body.voice = local.voice;
   if (local.speed) body.speed = local.speed;

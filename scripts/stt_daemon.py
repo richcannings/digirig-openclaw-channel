@@ -10,6 +10,12 @@ import warnings
 # Suppress FP16 warnings on CPU
 warnings.filterwarnings("ignore")
 
+try:
+    import static_ffmpeg
+    static_ffmpeg.add_paths()
+except Exception:
+    pass
+
 model = None
 
 class WhisperHandler(http.server.BaseHTTPRequestHandler):

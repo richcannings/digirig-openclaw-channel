@@ -18,7 +18,11 @@
   },
   "scripts": {
     "test": "vitest run",
-    "test:smoke": "./scripts/self-test.sh"
+    "test:smoke": "./scripts/self-test.sh",
+    "test:tx": "node scripts/test-tx.cjs",
+    "test:rx-meter": "node scripts/rx-meter.cjs",
+    "doctor": "node scripts/doctor.cjs",
+    "setup": "node scripts/setup-wizard.cjs"
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.48",

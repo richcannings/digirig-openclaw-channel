@@ -121,12 +121,51 @@ archive/
                                        (referenced from docs/ROADMAP.md V6)
 ```
 
+## AI Assistant Triage Playbook
+
+When helping an operator set up or debug this channel, follow this exact 5-step triage ladder instead of guessing:
+
+1. **Run Full Doctor First:**
+   ```bash
+   npm run doctor
+   ```
+   Inspect the output table. It validates USB serial, ALSA soundcard, ALSA mixer, FFmpeg, daemons, and synthetic loopback.
+
+2. **Audit & Fix ALSA Mixer:**
+   The C-Media CM108 soundcard often resets capture volume to 0 or enables AGC when reconnected. Always run:
+   ```bash
+   npm run doctor -- --fix-mixer
+   ```
+   This unsets AGC, sets Mic Capture to 100% (+23.81 dB), unsets playback mutes, and persists via `alsactl store`.
+
+3. **Test Transmit Independently (TX Half):**
+   Before troubleshooting receive, confirm PTT, TTS, and RF modulation work:
+   ```bash
+   npm run test:tx "Station W6RGC testing transmission"
+   ```
+   If the operator hears this on their handheld, the entire TX pipeline is 100% functional.
+
+4. **Calibrate Receive Sensitivity (RX Half):**
+   If the bot doesn't respond to transmissions:
+   ```bash
+   npm run test:rx-meter
+   ```
+   Have the operator key up while watching the live VU meter.
+   - If energy is stuck at `0.0002` flat, verify the radio volume knob is at ~40%–50% and the cable is plugged into the DigiRig `AUDIO` jack (not `SERIAL`).
+   - If energy rises to `0.01 – 0.20`, VAD threshold (`0.003`) is working properly.
+
+5. **Verify STT Inference Latency & Model Quality:**
+   - On CPU / Jetson: Default to `--model base.en` (~1.0s latency).
+   - On CUDA GPU: Use `--model small.en` with FP16 (~300ms latency).
+   - **Quality vs Latency Rule:** If the model has trouble hearing noisy/distorted radio audio accurately, bump the model up to `medium.en`.
+   - If Whisper throws `ffmpeg` missing errors, ensure `static-ffmpeg` is installed in the venv.
+
 ## Don't Do These Things
-- Don't route DTMF through TTS — it doesn't work (frequencies get filtered)
-- Don't try to key PTT from outside the channel runtime — the serial port is exclusively owned by the channel (port lock)
-- Don't assume the AI can execute shell commands reliably from the radio session — tool calling is inconsistent
-- Don't hardcode callsigns — use config values
-- Don't log personal info from the SCCARC roster (it contains only callsigns + names, not contact info)
+- Don't assume or hardcode default aliases or callsigns — ask the operator for their preferred wake name and callsign, or use `npm run setup`.
+- Don't route DTMF through TTS — it doesn't work (frequencies get filtered).
+- Don't try to key PTT from outside the channel runtime — the serial port is exclusively owned by the channel (port lock).
+- Don't assume the AI can execute shell commands reliably from the radio session — tool calling is inconsistent.
+- Don't log personal info from the SCCARC roster (it contains only callsigns + names, not contact info).
 
 ## Hard Operational Constraints
 - **DTMF Generation**: Never route DTMF through TTS. It is proven to fail. Always use the `dtmf-send.mjs` script via the `digirig-tones` skill to inject raw PCM.
