@@ -89,7 +89,7 @@ const digirigPlugin: ChannelPlugin<DigirigConfig> = {
     deliveryMode: "direct",
     sendText: async ({ text }) => {
       const runtime = getRuntime();
-      const cfg = getDigirigRuntime().config.loadConfig();
+      const cfg = getDigirigRuntime().config.current();
       const callsign = cfg.channels?.digirig?.tx?.callsign ?? DEFAULT_TX_CALLSIGN;
       // Strip any [SENDER:CALLSIGN] prefix the LLM emits (see prompt/contracts.ts
       // section 9). That tag is plugin-internal metadata and must never be spoken.
@@ -153,7 +153,7 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
         return { text: "Usage: /digirig tx <text>" };
       }
       const runtime = getRuntime();
-      const cfg = getDigirigRuntime().config.loadConfig();
+      const cfg = getDigirigRuntime().config.current();
       const callsign = cfg.channels?.digirig?.tx?.callsign ?? DEFAULT_TX_CALLSIGN;
       await runtime.speak(appendCallsign(text, callsign));
       return { text: "Transmitted via DigiRig" };
@@ -172,7 +172,7 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
     }
 
     if (action === "doctor") {
-      const cfg = getDigirigRuntime().config.loadConfig();
+      const cfg = getDigirigRuntime().config.current();
       const ttsEngine = cfg.channels?.digirig?.localTts?.engine ?? "off";
       const [listener, audioIn, audioOut, serial] = await Promise.all([
         runShellCapture("ss", ["-ltn"]),
@@ -291,7 +291,7 @@ export default function register(api: { runtime: unknown; registerCommand: Funct
       if (!text) {
         throw new Error("text is required");
       }
-      const cfg = getDigirigRuntime().config.loadConfig();
+      const cfg = getDigirigRuntime().config.current();
       const policy = cfg.channels?.digirig?.tx?.policy ?? "direct-only";
       if (policy !== "proactive") {
         throw new Error("digirig_tx requires tx.policy=proactive");

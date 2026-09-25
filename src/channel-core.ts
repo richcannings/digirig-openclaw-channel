@@ -16,7 +16,7 @@ export function createRadioContextPayload(
     body: text,
   });
 
-  const radioSessionKey = "digirig:radio";
+  const radioSessionKey = radioSessionKeyFor(route.agentId);
   return runtime.channel.reply.finalizeInboundContext({
     Body: body,
     RawBody: text,
@@ -40,6 +40,12 @@ export function createRadioContextPayload(
     OriginatingTo: "digirig:radio",
     CommandAuthorized: true,
   });
+}
+
+// OpenClaw 2026.9+ rejects session writes to non-canonical keys; the canonical
+// form is agent-scoped, which also matches where pre-upgrade radio history lives.
+export function radioSessionKeyFor(agentId: string | undefined): string {
+  return `agent:${agentId || "main"}:digirig:radio`;
 }
 
 export async function recordInboundSession(runtime: any, cfg: any, route: any, ctxPayload: any, log: any) {

@@ -4,7 +4,7 @@ import * as http from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ChannelGatewayContext as ChannelGatewayStartContext } from "openclaw/plugin-sdk/channel-contract";
-import { createRadioContextPayload, dispatchRadioReply, recordInboundSession } from "./channel-core.js";
+import { createRadioContextPayload, dispatchRadioReply, radioSessionKeyFor, recordInboundSession } from "./channel-core.js";
 import { getDigirigRuntime } from "./state.js";
 import type { DigirigConfig } from "./config.js";
 import { AudioMonitor } from "./audio-monitor.js";
@@ -426,7 +426,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
         if (!job || runLoopAbort?.signal.aborted) break;
 
         try {
-          const cfg = runtime.config.loadConfig();
+          const cfg = runtime.config.current();
           const routeStartAt = Date.now();
           const route = runtime.channel.routing.resolveAgentRoute({
             cfg,
@@ -485,7 +485,7 @@ export async function createDigirigRuntime(config: DigirigConfig): Promise<Digir
             log: ctx.log,
             deliver: async (payload) => {
               if (!payload.text) return;
-              if (ctxPayload.OriginatingChannel !== "digirig" || ctxPayload.SessionKey !== "digirig:radio") return;
+              if (ctxPayload.OriginatingChannel !== "digirig" || ctxPayload.SessionKey !== radioSessionKeyFor(route.agentId)) return;
               if (didSpeak) return;
 
               let replyText = payload.text;
