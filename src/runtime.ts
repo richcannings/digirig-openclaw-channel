@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import * as http from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ChannelGatewayContext as ChannelGatewayStartContext } from "openclaw/plugin-sdk/channel-runtime";
+import { type ChannelGatewayContext as ChannelGatewayStartContext } from "openclaw/plugin-sdk/channel-contract";
 import { createRadioContextPayload, dispatchRadioReply, recordInboundSession } from "./channel-core.js";
 import { getDigirigRuntime } from "./state.js";
 import type { DigirigConfig } from "./config.js";

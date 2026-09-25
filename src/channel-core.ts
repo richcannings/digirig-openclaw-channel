@@ -1,4 +1,4 @@
-import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-runtime";
+import { createReplyPrefixOptions } from "openclaw/plugin-sdk/channel-reply-pipeline";
 
 export function createRadioContextPayload(
   runtime: any,

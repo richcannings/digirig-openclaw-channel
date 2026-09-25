@@ -1,7 +1,8 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
-import pkg from "wavefile";
-const { WaveFile } = pkg;
+import * as wavefile from "wavefile";
+// Named export under ESM resolution, default-wrapped under CJS interop.
+const { WaveFile } = ((wavefile as any).WaveFile ? wavefile : (wavefile as any).default) as typeof import("wavefile");
 
 export class AudioAssets {
   private static cache = new Map<string, Buffer>();
